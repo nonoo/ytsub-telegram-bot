@@ -1,6 +1,7 @@
 import html
 import json
 import logging
+import time
 from typing import Any, Dict, Optional
 
 import aiohttp
@@ -197,11 +198,14 @@ def setup_handlers(app, params: Params, state: StateManager):
             )
 
         # Check channels updated more than 5 minutes (300 seconds) ago across all users
+        start_time = time.time()
         checked = await check_channels_and_notify(
             state=state,
             send_message_fn=send_fn,
             min_seconds_since_check=300.0
         )
+        elapsed = time.time() - start_time
+        logger.info("Reload check completed in %.2f seconds (%d channels checked).", elapsed, checked)
 
         await update.effective_message.reply_text(
             f"State reloaded from disk. Checked {checked} channel(s) updated more than 5 minutes ago."

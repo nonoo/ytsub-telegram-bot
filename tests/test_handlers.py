@@ -528,5 +528,50 @@ async def test_cmd_status():
         assert len(lines) == 10
 
 
+@pytest.mark.asyncio
+async def test_apscheduler_job_duration_filter():
+    from main import APSchedulerJobDurationFilter, format_duration
+
+    # 1. Test format_duration
+    assert format_duration(0) == "0s"
+    assert format_duration(14.2) == "14s"
+    assert format_duration(62.1) == "1m2s"
+    assert format_duration(3665) == "1h1m5s"
+
+    # 2. Test filter appending duration to apscheduler logs
+    duration_filter = APSchedulerJobDurationFilter()
+    job_str = 'rss_check (trigger: interval[0:05:00], next run at: 2026-09-13 15:02:47 UTC)'
+
+    start_record = logging.LogRecord(
+        name="apscheduler.executors.default",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='Running job "%s" (scheduled at %s)',
+        args=(job_str, "2026-09-13 14:57:47.996090+00:00"),
+        exc_info=None
+    )
+    assert duration_filter.filter(start_record) is True
+
+    # Artificially set start time 62 seconds in past
+    duration_filter.job_start_times[job_str] -= 62.0
+
+    success_record = logging.LogRecord(
+        name="apscheduler.executors.default",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='Job "%s" executed successfully',
+        args=(job_str,),
+        exc_info=None
+    )
+    assert duration_filter.filter(success_record) is True
+    assert success_record.getMessage() == f'Job "{job_str}" executed successfully, took 1m2s'
+
+    # Filter running a second time should not duplicate ", took"
+    assert duration_filter.filter(success_record) is True
+    assert success_record.getMessage() == f'Job "{job_str}" executed successfully, took 1m2s'
+
+
 
 

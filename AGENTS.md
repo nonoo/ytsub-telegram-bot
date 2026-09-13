@@ -105,6 +105,7 @@ ytsub-telegram-bot/
 
 ### `main.py`
 - Instantiates `ApplicationBuilder`, attaches handlers, and schedules periodic RSS polling via `job_queue.run_repeating()`.
+- Appends job execution duration to APScheduler completion logs (e.g. `Job "..." executed successfully, took 1m2s`) via `APSchedulerJobDurationFilter`.
 - Filters out verbose `api.telegram.org` `getUpdates` HTTP polling requests from logs via `TelegramGetUpdatesFilter`.
 - Sends startup notification to admin users.
 

@@ -1,5 +1,6 @@
 import logging
 import sys
+import time
 from typing import Any, Optional
 
 from telegram.ext import ApplicationBuilder, ContextTypes
@@ -14,6 +15,37 @@ class TelegramGetUpdatesFilter(logging.Filter):
         return "getUpdates" not in record.getMessage()
 
 
+def format_duration(seconds: float) -> str:
+    secs = int(round(seconds))
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    rem_secs = secs % 60
+    if mins < 60:
+        return f"{mins}m{rem_secs}s"
+    hours = mins // 60
+    rem_mins = mins % 60
+    return f"{hours}h{rem_mins}m{rem_secs}s"
+
+
+class APSchedulerJobDurationFilter(logging.Filter):
+    def __init__(self):
+        super().__init__()
+        self.job_start_times = {}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args and len(record.args) >= 1:
+            if "Running job" in record.msg:
+                self.job_start_times[str(record.args[0])] = time.monotonic()
+            elif "executed successfully" in record.msg and ", took " not in record.msg:
+                job_key = str(record.args[0])
+                start = self.job_start_times.pop(job_key, None)
+                if start is not None:
+                    duration = format_duration(time.monotonic() - start)
+                    record.msg = f"{record.msg}, took {duration}"
+        return True
+
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -26,6 +58,11 @@ logging.getLogger("httpcore").addFilter(get_updates_filter)
 logging.getLogger("telegram").addFilter(get_updates_filter)
 for handler in logging.root.handlers:
     handler.addFilter(get_updates_filter)
+
+# Append execution duration to apscheduler job execution logs
+job_duration_filter = APSchedulerJobDurationFilter()
+logging.getLogger("apscheduler.executors.default").addFilter(job_duration_filter)
+logging.getLogger("apscheduler").addFilter(job_duration_filter)
 
 logger = logging.getLogger("ytsub")
 
