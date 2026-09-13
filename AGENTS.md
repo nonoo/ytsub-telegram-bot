@@ -136,3 +136,4 @@ ytsub-telegram-bot/
 - **Docker Usage**: Containers run system Python directly without a virtual environment.
 - **Running Tests**: Run tests from the project root with `.venv/bin/pytest -v`.
 - **Adding Commands**: Register new handlers in `handlers.py` and ensure unauthorized callers are intercepted by `check_access`.
+- **Documentation Updates**: Both `README.md` and `AGENTS.md` must always be kept updated whenever features, commands, configurations, schemas, or architectural conventions are added or modified.
