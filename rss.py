@@ -14,6 +14,14 @@ from state import StateManager, parse_human_datetime, parse_human_timestamp, utc
 
 logger = logging.getLogger(__name__)
 
+ERROR_ALERT_THRESHOLD = 10
+
+
+class FeedFetchError(Exception):
+    """Raised when an RSS feed cannot be fetched via HTTP."""
+    pass
+
+
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
 RSS_BASE_URL = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 YOUTUBE_VIDEO_ID_REGEX = re.compile(r"(?:v=|/v/|youtu\.be/|/embed/|/shorts/)([a-zA-Z0-9_-]{11})")
@@ -90,13 +98,15 @@ def extract_feed_author(root: ET.Element) -> str:
 
 def parse_feed(xml_text: str) -> Tuple[str, List[VideoEntry]]:
     """Parses feed XML (Atom or RSS), returning (author_name, entries)."""
-    entries: List[VideoEntry] = []
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
-        logger.warning("Failed to parse RSS XML: %s", e)
-        return "", entries
+    if not xml_text or not xml_text.strip():
+        raise ValueError("Empty feed content")
 
+    root = ET.fromstring(xml_text)
+    root_tag_lower = root.tag.lower()
+    if "feed" not in root_tag_lower and "rss" not in root_tag_lower:
+        raise ValueError(f"Invalid feed format (root element: <{root.tag}>)")
+
+    entries: List[VideoEntry] = []
     feed_author = extract_feed_author(root)
 
     # Find entries: check atom:entry, entry, item, channel/item
@@ -175,20 +185,22 @@ def parse_atom_feed(xml_text: str) -> List[VideoEntry]:
     return parse_feed(xml_text)[1]
 
 
-async def fetch_feed_url(session: aiohttp.ClientSession, url: str) -> Optional[str]:
+async def fetch_feed_url(session: aiohttp.ClientSession, url: str) -> str:
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
             if resp.status == 200:
                 return await resp.text()
             else:
                 logger.warning("Failed to fetch RSS from %s: HTTP %s", url, resp.status)
-                return None
+                raise FeedFetchError(f"HTTP {resp.status}")
     except Exception as e:
+        if isinstance(e, FeedFetchError):
+            raise
         logger.warning("Network error fetching RSS from %s: %s", url, e)
-        return None
+        raise FeedFetchError(f"Network error: {e}")
 
 
-async def fetch_channel_rss(session: aiohttp.ClientSession, channel_id: str) -> Optional[str]:
+async def fetch_channel_rss(session: aiohttp.ClientSession, channel_id: str) -> str:
     return await fetch_feed_url(session, RSS_BASE_URL.format(channel_id=channel_id))
 
 
@@ -262,14 +274,74 @@ async def check_channels_and_notify(
             check_timestamp_epoch = time.time()
 
             for (url, subscribers), feed_result in zip(chunk, results):
-                if isinstance(feed_result, Exception) or not feed_result:
+                error_msg: Optional[str] = None
+                feed_author = ""
+                entries: List[VideoEntry] = []
+
+                if isinstance(feed_result, Exception):
+                    error_msg = str(feed_result)
+                elif not feed_result:
+                    error_msg = "Empty response from server"
+                else:
+                    try:
+                        feed_author, entries = parse_feed(feed_result)
+                    except Exception as e:
+                        error_msg = str(e)
+
+                if error_msg:
+                    logger.warning("Feed error for %s: %s", url, error_msg)
+                    for user_id, is_custom, key, last_pub_val, ch_title in subscribers:
+                        display_title = ch_title or key
+                        should_alert = state.record_feed_error(
+                            user_id=user_id,
+                            is_custom=is_custom,
+                            key=key,
+                            error_msg=error_msg,
+                            threshold=ERROR_ALERT_THRESHOLD
+                        )
+                        if should_alert:
+                            alert_text = (
+                                f"⚠️ Error updating feed \"{display_title}\" (10 consecutive failures):\n"
+                                f"{error_msg}"
+                            )
+                            try:
+                                await send_message_fn(user_id, alert_text)
+                            except Exception as e:
+                                logger.error("Failed to send error notification to %s: %s", user_id, e)
+
+                        if is_custom:
+                            state.update_custom_feed_timestamps(
+                                user_id=user_id,
+                                url=key,
+                                last_checked_epoch=check_timestamp_epoch
+                            )
+                        else:
+                            state.update_channel_timestamps(
+                                user_id=user_id,
+                                channel_id=key,
+                                last_checked_epoch=check_timestamp_epoch
+                            )
                     continue
 
-                feed_author, entries = parse_feed(feed_result)
+                # Successful fetch and parse
                 checked_count += 1
 
                 for user_id, is_custom, key, last_pub_val, ch_title in subscribers:
                     display_title = ch_title or feed_author or "Channel"
+
+                    was_failing = state.reset_feed_error(
+                        user_id=user_id,
+                        is_custom=is_custom,
+                        key=key,
+                        threshold=ERROR_ALERT_THRESHOLD
+                    )
+                    if was_failing:
+                        recovery_text = f"✅ Feed \"{display_title}\" is working again."
+                        try:
+                            await send_message_fn(user_id, recovery_text)
+                        except Exception as e:
+                            logger.error("Failed to send recovery notification to %s: %s", user_id, e)
+
                     last_pub_dt = parse_human_datetime(last_pub_val)
                     newest_pub_dt = None
 
@@ -326,4 +398,3 @@ async def check_channels_and_notify(
                         )
 
     return checked_count
-

@@ -431,6 +431,14 @@ async def test_cmd_custom_list_and_manage():
         assert "Removed custom feed: <b>Google Developers</b>" in mock_reply_html.call_args[0][0]
         assert len(sm.get_user_custom_feeds(1001)) == 0
 
+        # 5. /custom add with failing URL
+        with patch("handlers.fetch_feed_url", new_callable=AsyncMock) as mock_fail_fetch:
+            mock_fail_fetch.side_effect = Exception("HTTP 404")
+            context.args = ["add", "https://broken.feed/rss"]
+            await custom_handler.callback(mock_update, context)
+            assert "Failed to fetch or parse feed from URL (HTTP 404)" in mock_reply_text.call_args[0][0]
+            assert len(sm.get_user_custom_feeds(1001)) == 0
+
 
 @pytest.mark.asyncio
 async def test_cmd_custom_unauthorized():

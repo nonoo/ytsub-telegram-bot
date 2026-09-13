@@ -246,16 +246,16 @@ def setup_handlers(app, params: Params, state: StateManager):
                 await update.effective_message.reply_text("Invalid URL or channel ID.")
                 return
 
-            async with aiohttp.ClientSession() as session:
-                xml_text = await fetch_feed_url(session, url)
-
-            if not xml_text:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    xml_text = await fetch_feed_url(session, url)
+                feed_author, entries = parse_feed(xml_text)
+            except Exception as e:
                 await update.effective_message.reply_text(
-                    f"Failed to fetch feed from URL. Please check that the URL is reachable:\n{url}"
+                    f"Failed to fetch or parse feed from URL ({e}). Please check that the URL is reachable:\n{url}"
                 )
                 return
 
-            feed_author, entries = parse_feed(xml_text)
             feed_title = feed_author or (entries[0].title if entries else "") or raw_input
 
             is_new = state.add_custom_feed(user_id=user_id, url=url, title=feed_title)

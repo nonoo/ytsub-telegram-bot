@@ -186,3 +186,66 @@ def test_sync_preserves_custom_feeds():
         assert "UC_A" in sm.get_user(1001)["channels"]
 
 
+def test_record_and_reset_feed_error():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_file = os.path.join(tmpdir, "test-state.json")
+        sm = StateManager(state_file)
+
+        # 1. Test regular channel
+        sm.sync_user_channels(1001, {"UC_A": "Channel A"})
+        ch = sm.get_user(1001)["channels"]["UC_A"]
+        assert ch["error_count"] == 0
+        assert ch["last_error"] is None
+
+        # Failures 1 through 9 should return False (no alert)
+        for i in range(1, 10):
+            alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg=f"Err {i}")
+            assert alert is False
+            assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == i
+            assert sm.get_user(1001)["channels"]["UC_A"]["last_error"] == f"Err {i}"
+
+        # 10th failure should return True (trigger alert)
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 10")
+        assert alert is True
+        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 10
+
+        # 11th failure should remain capped at 10 and return False
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 11")
+        assert alert is False
+        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 10
+        assert sm.get_user(1001)["channels"]["UC_A"]["last_error"] == "Err 11"
+
+        # Successful reset after reaching 10 should return True (trigger recovery alert)
+        recovered = sm.reset_feed_error(1001, is_custom=False, key="UC_A")
+        assert recovered is True
+        ch_after = sm.get_user(1001)["channels"]["UC_A"]
+        assert ch_after["error_count"] == 0
+        assert ch_after["last_error"] is None
+
+        # Resetting again when count is 0 returns False
+        assert sm.reset_feed_error(1001, is_custom=False, key="UC_A") is False
+
+        # Resetting when count was < 10 returns False
+        sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Minor err")
+        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 1
+        assert sm.reset_feed_error(1001, is_custom=False, key="UC_A") is False
+        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 0
+
+        # 2. Test custom feed
+        feed_url = "https://example.com/rss.xml"
+        sm.add_custom_feed(1001, feed_url, "Custom Feed")
+        feed = sm.get_user_custom_feeds(1001)[feed_url]
+        assert feed["error_count"] == 0
+        assert feed["last_error"] is None
+
+        for _ in range(9):
+            sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err")
+        alert = sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err 10")
+        assert alert is True
+
+        recovered = sm.reset_feed_error(1001, is_custom=True, key=feed_url)
+        assert recovered is True
+        assert sm.get_user_custom_feeds(1001)[feed_url]["error_count"] == 0
+        assert sm.get_user_custom_feeds(1001)[feed_url]["last_error"] is None
+
+

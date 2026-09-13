@@ -65,8 +65,10 @@ ytsub-telegram-bot/
 - Tracks channel and custom feed timestamps:
   - `last_published` in human format (`YYYY-MM-DD HH:MM:SS UTC`).
   - `last_checked` in human format (`YYYY-MM-DD HH:MM:SS UTC`).
+  - `error_count` (int, default 0, capped at 10) and `last_error` (string or null).
 - Handles subscription syncing: `sync_user_channels()` sets current timestamp for new channels so past videos are not alerted, and preserves `custom_feeds`.
 - Manages custom RSS feeds: `get_user_custom_feeds()`, `add_custom_feed()`, `remove_custom_feed()`, `update_custom_feed_timestamps()`.
+- Tracks errors and recoveries: `record_feed_error()` and `reset_feed_error()`.
 
 ### `youtube.py`
 - Encapsulates Google OAuth 2.0 and YouTube Data API v3 operations.
@@ -89,6 +91,7 @@ ytsub-telegram-bot/
   - `parse_feed(xml_text)`: Parses Atom (`<entry>`) and RSS (`<item>`) feeds, extracting `video_id`, title, URL, and timestamps.
   - `check_channels_and_notify()`: Deduplicates and polls feed URLs across users, dispatching notifications formatted as `[{channel_title}] {url}` with `🕒 Watch Later` and `🎧 Listen Later` buttons.
 - Supports `min_seconds_since_check` thresholding (used by `/reload` to filter feeds checked > 300s ago).
+- Error tracking and alert dispatching: detects HTTP and XML parsing failures, records `error_count` and `last_error` in state, alerts the user once when `error_count` reaches 10, keeps counter at 10, and dispatches a recovery notification upon subsequent success.
 
 ### `handlers.py`
 - Implements Telegram interactions using `python-telegram-bot` v21+:
@@ -123,14 +126,18 @@ ytsub-telegram-bot/
         "UC_x5XG1OV2P6uZZ5FSM9Ttw": {
           "title": "Google Developers",
           "last_published": "2026-09-13 10:00:00 UTC",
-          "last_checked": "2026-09-13 11:25:00 UTC"
+          "last_checked": "2026-09-13 11:25:00 UTC",
+          "error_count": 0,
+          "last_error": null
         }
       },
       "custom_feeds": {
         "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw": {
           "title": "Google Developers",
           "last_published": "2026-09-13 14:00:00 UTC",
-          "last_checked": "2026-09-13 14:05:00 UTC"
+          "last_checked": "2026-09-13 14:05:00 UTC",
+          "error_count": 0,
+          "last_error": null
         }
       }
     }

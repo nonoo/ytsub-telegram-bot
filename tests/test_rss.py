@@ -5,7 +5,7 @@ import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from rss import VideoEntry, check_channels_and_notify, parse_atom_feed
+from rss import FeedFetchError, VideoEntry, check_channels_and_notify, parse_atom_feed
 from state import StateManager
 
 SAMPLE_FEED = """<?xml version="1.0" encoding="UTF-8"?>
@@ -219,4 +219,85 @@ async def test_check_custom_feeds_and_notify():
             buttons = reply_markup.inline_keyboard[0]
             assert buttons[0].callback_data == "wl:cust1"
             assert buttons[1].callback_data == "ll:cust1"
+
+
+@pytest.mark.asyncio
+async def test_feed_error_alert_on_tenth_failure_and_recovery():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        sm.set_user_tokens(101, "t1", "r1")
+        sm.sync_user_channels(101, {"UC_ERR": "Broken Channel"})
+
+        sent_messages = []
+
+        async def mock_send(chat_id: int, text: str, reply_markup=None):
+            sent_messages.append((chat_id, text))
+
+        with patch("rss.fetch_channel_rss", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.side_effect = FeedFetchError("HTTP 500")
+
+            # Run 9 failures: error_count goes 1..9, no alert messages sent
+            for i in range(1, 10):
+                checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
+                assert checked == 0
+                assert len(sent_messages) == 0
+                ch = sm.get_user(101)["channels"]["UC_ERR"]
+                assert ch["error_count"] == i
+                assert ch["last_error"] == "HTTP 500"
+
+            # 10th failure: alert message must be sent to user
+            checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
+            assert checked == 0
+            assert len(sent_messages) == 1
+            chat_id, text = sent_messages[0]
+            assert chat_id == 101
+            assert '⚠️ Error updating feed "Broken Channel" (10 consecutive failures):' in text
+            assert "HTTP 500" in text
+
+            ch = sm.get_user(101)["channels"]["UC_ERR"]
+            assert ch["error_count"] == 10
+
+            # 11th failure: error_count stays 10, no new alert sent
+            checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
+            assert checked == 0
+            assert len(sent_messages) == 1
+            assert sm.get_user(101)["channels"]["UC_ERR"]["error_count"] == 10
+
+            # 12th run: feed recovers!
+            mock_fetch.side_effect = None
+            mock_fetch.return_value = SAMPLE_FEED
+
+            checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
+            assert checked == 1
+            # A recovery notification should have been sent
+            assert len(sent_messages) == 2
+            chat_id, text = sent_messages[1]
+            assert chat_id == 101
+            assert '✅ Feed "Broken Channel" is working again.' in text
+
+            # State error_count should be reset to 0 and last_error to None
+            ch = sm.get_user(101)["channels"]["UC_ERR"]
+            assert ch["error_count"] == 0
+            assert ch["last_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_feed_parse_error_tracking():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        sm.add_custom_feed(101, "https://example.com/bad.xml", "Malformed Feed")
+
+        sent_messages = []
+
+        async def mock_send(chat_id: int, text: str, reply_markup=None):
+            sent_messages.append((chat_id, text))
+
+        with patch("rss.fetch_feed_url", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = "<html><body>Not XML</body></html>"
+
+            checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
+            assert checked == 0
+            feed = sm.get_user_custom_feeds(101)["https://example.com/bad.xml"]
+            assert feed["error_count"] == 1
+            assert "Invalid feed format" in feed["last_error"]
 

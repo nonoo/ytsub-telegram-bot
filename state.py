@@ -202,7 +202,9 @@ class StateManager:
                 updated_channels[ch_id] = {
                     "title": title,
                     "last_published": now_human,
-                    "last_checked": now_human
+                    "last_checked": now_human,
+                    "error_count": 0,
+                    "last_error": None
                 }
 
         user["channels"] = updated_channels
@@ -277,7 +279,9 @@ class StateManager:
                 "title": title,
                 "url": url,
                 "last_published": now_human,
-                "last_checked": now_human
+                "last_checked": now_human,
+                "error_count": 0,
+                "last_error": None
             }
         else:
             feeds[url]["title"] = title
@@ -345,5 +349,62 @@ class StateManager:
             feed["last_checked"] = format_human_timestamp(epoch=last_checked_epoch)
 
         self.save()
+
+    def record_feed_error(
+        self,
+        user_id: int,
+        is_custom: bool,
+        key: str,
+        error_msg: str,
+        threshold: int = 10
+    ) -> bool:
+        """
+        Increments error_count (capped at threshold) and updates last_error.
+        Returns True if error_count just reached threshold (transitioned from threshold-1 to threshold),
+        prompting a notification to the user. Returns False otherwise.
+        """
+        user = self.get_user(user_id)
+        container = user.get("custom_feeds" if is_custom else "channels", {})
+        if key not in container:
+            return False
+
+        feed = container[key]
+        prev_count = feed.get("error_count", 0)
+        new_count = min(prev_count + 1, threshold)
+        feed["error_count"] = new_count
+        feed["last_error"] = str(error_msg)
+        self.save()
+        return bool(new_count == threshold and prev_count < threshold)
+
+    def reset_feed_error(
+        self,
+        user_id: int,
+        is_custom: bool,
+        key: str,
+        threshold: int = 10
+    ) -> bool:
+        """
+        Resets error_count to 0 and clears last_error when a feed is processed successfully.
+        Returns True if the feed had previously reached the error threshold, prompting a recovery notification.
+        """
+        user = self.get_user(user_id)
+        container = user.get("custom_feeds" if is_custom else "channels", {})
+        if key not in container:
+            return False
+
+        feed = container[key]
+        prev_count = feed.get("error_count", 0)
+        has_changes = False
+        if prev_count > 0:
+            feed["error_count"] = 0
+            has_changes = True
+        if feed.get("last_error") is not None:
+            feed["last_error"] = None
+            has_changes = True
+
+        if has_changes:
+            self.save()
+
+        return bool(prev_count >= threshold)
 
 
