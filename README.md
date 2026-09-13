@@ -1,0 +1,125 @@
+# YTSub Telegram Bot
+
+<p align="center">
+  <img src="logo.png" alt="YTSub Telegram Bot" width="250">
+</p>
+
+A Telegram bot that monitors YouTube subscriptions and sends updates about new video uploads using channel RSS feeds.
+
+Tested on Linux, but can run on any system with Python 3.
+
+## Prerequisites
+
+1. Create a Telegram bot using [BotFather](https://t.me/BotFather) and get the bot's `token`.
+2. **Get Google OAuth 2.0 Client ID & Client Secret**:
+   - Go to the [Google Cloud Console](https://console.cloud.google.com/).
+   - Click the project dropdown at the top and click **New Project** (name it e.g. `YTSub`), then click **Create**.
+   - **Enable the YouTube API**:
+     - In the left sidebar, navigate to **APIs & Services** > **Library**.
+     - Search for `YouTube Data API v3`, click it, and click **Enable**.
+   - **Configure the OAuth Consent Screen**:
+     - In the left sidebar, click **APIs & Services** > **OAuth consent screen**.
+     - Select **External** user type and click **Create**.
+     - Fill in **App name** (e.g. `YTSub`), **User support email**, and **Developer contact information** (your email). Click **Save and Continue**.
+     - On the **Scopes** page, click **Add or Remove Scopes**. Search for `YouTube Data API v3`, select the scope `.../auth/youtube.readonly` (*View your YouTube account*), click **Update**, then **Save and Continue**.
+     - On the **Test users** page, click **+ Add Users**, enter the Google account email address you use for YouTube (and any other users who will connect), then click **Save and Continue**.
+     - Click **Back to Dashboard**.
+   - **Create OAuth Client Credentials**:
+     - In the left sidebar, navigate to **APIs & Services** > **Credentials**.
+     - Click **+ Create Credentials** at the top and select **OAuth client ID**.
+     - In the **Application type** dropdown, select **Desktop app**.
+     - Enter a name (e.g. `YTSub Client`) and click **Create**.
+     - A modal will pop up with your **Client ID** and **Client Secret**.
+   - Copy these two values into `config.inc.sh`:
+     ```bash
+     GOOGLE_CLIENT_ID="xxxxxxxxxxxx-xxxxxxxxxxxxxxxx.apps.googleusercontent.com"
+     GOOGLE_CLIENT_SECRET="GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
+     ```
+
+## Configuration & Running
+
+You can configure the bot via command-line arguments or environment variables.
+
+### Environment variables
+
+- `BOT_TOKEN`: Telegram bot token (required)
+- `ADMIN_USERIDS`: Comma-separated list of Telegram admin user IDs (admins receive a startup notification)
+- `ALLOWED_USERIDS`: Comma-separated list of allowed Telegram user IDs (if not specified, all users can interact)
+- `STATE_FILE`: Path to persistent state file (default: `ytsub-state.json`)
+- `CHECK_INTERVAL_SEC`: RSS polling interval in seconds (default: `300` / 5 minutes)
+- `GOOGLE_CLIENT_ID`: Google OAuth Client ID (optional, or put `client_secret.json` in bot directory)
+- `GOOGLE_CLIENT_SECRET`: Google OAuth Client Secret (optional)
+- `GOOGLE_CLIENT_SECRET_FILE`: Path to `client_secret.json` (auto-detected if `client_secret.json` is in the bot root)
+
+### Running locally
+
+Copy `config.inc.sh-example` to `config.inc.sh` and edit with your parameters:
+
+```bash
+cp config.inc.sh-example config.inc.sh
+chmod 600 config.inc.sh
+```
+
+Then start the bot using `run.sh`:
+
+```bash
+./run.sh
+```
+
+`run.sh` will automatically create a Python virtual environment in `.venv/` and install all required packages.
+
+### Running with Docker / Container
+
+You can build and run using `buildah` / `podman` or `docker`:
+
+```bash
+./01-buildah-image.sh
+```
+
+Or with Docker:
+
+```bash
+docker build -t nonoo/ytsub-telegram-bot:latest .
+docker run -d --name ytsub \
+  -e BOT_TOKEN="your-telegram-bot-token" \
+  -e ADMIN_USERIDS="123456789" \
+  -v $(pwd)/ytsub-state.json:/app/ytsub-state.json \
+  nonoo/ytsub-telegram-bot:latest
+```
+
+## User Onboarding & Commands
+
+Each authorized user can independently connect their YouTube account and receive notifications only for channels they subscribe to.
+
+1. Send `/start` to the bot.
+   - The bot immediately provides an authorization link.
+   - Click the link, sign in to your Google account, and grant read access to YouTube.
+   - Copy the authorization code (or the full redirected URL) from your browser and paste it into the Telegram chat.
+   - Once authenticated, the bot automatically downloads your list of subscribed channels.
+
+### Available commands
+
+- `/start`: Connect or re-authenticate your YouTube account via OAuth 2.0. If credentials already exist, prompts for confirmation before redoing the flow.
+- `/update`: Refresh and synchronize your subscribed YouTube channels from YouTube Data API v3.
+- `/reload`: Reload the state from `ytsub-state.json` and perform RSS feed updates on channels updated more than 5 minutes ago (admin only).
+- `/status`: Show current tracking status (channels tracked, check interval, authentication state).
+- `/help`: Display the list of available commands.
+
+## How it works
+
+1. **New channel subscriptions**: When channels are first added to your account, existing videos are not spammed. The current timestamp is recorded in `ytsub-state.json`.
+2. **Periodic feed checks**: Every 5 minutes (configurable with `CHECK_INTERVAL_SEC`), the bot checks the YouTube Atom RSS feed (`https://www.youtube.com/feeds/videos.xml?channel_id=...`) for all tracked channels.
+3. **Targeted notifications**: When a new video upload is found, the bot sends a notification formatted as:
+   ```
+   {channel_title} https://www.youtube.com/watch?v={video_id}
+   ```
+   only to users subscribed to that channel.
+4. **State persistence**: User access tokens and channel update timestamps are persisted atomically to `ytsub-state.json`.
+
+## Contributors
+
+- Norbert Varga [nonoo@nonoo.hu](mailto:nonoo@nonoo.hu)
+
+## Donations
+
+If you find this bot useful then [buy me a beer](https://paypal.me/ha2non). :)

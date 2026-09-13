@@ -1,0 +1,6 @@
+config.inc.sh
+ytsub-state.json
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/

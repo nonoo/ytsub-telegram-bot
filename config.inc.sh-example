@@ -1,0 +1,11 @@
+BOT_TOKEN=
+ALLOWED_USERIDS=
+ADMIN_USERIDS=
+STATE_FILE=ytsub-state.json
+CHECK_INTERVAL_SEC=300
+
+# Google OAuth 2.0 Credentials (for YouTube API access)
+# Set either client ID & secret, or point to client_secret.json (or put client_secret.json in the bot directory)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_CLIENT_SECRET_FILE=
