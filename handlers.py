@@ -303,8 +303,10 @@ def setup_handlers(app, params: Params, state: StateManager):
         user_id = update.effective_user.id
         has_creds = state.has_user_oauth_credentials(user_id)
         user_info = state.get_user(user_id)
-        channel_count = len(user_info.get("channels", {}))
-        custom_feed_count = len(user_info.get("custom_feeds", {}))
+        channels = user_info.get("channels", {})
+        custom_feeds = user_info.get("custom_feeds", {})
+        channel_count = len(channels)
+        custom_feed_count = len(custom_feeds)
 
         msg = (
             f"<b>YTSub Bot Status</b>\n"
@@ -313,6 +315,29 @@ def setup_handlers(app, params: Params, state: StateManager):
             f"• Custom feeds: {custom_feed_count}\n"
             f"• Check interval: {params.check_interval_sec} seconds"
         )
+
+        error_feeds = []
+        for ch_id, ch_info in channels.items():
+            err_count = ch_info.get("error_count", 0)
+            if err_count > 0:
+                title = ch_info.get("title") or ch_id
+                error_feeds.append((title, err_count, ch_info.get("last_error")))
+
+        for f_url, f_info in custom_feeds.items():
+            err_count = f_info.get("error_count", 0)
+            if err_count > 0:
+                title = f_info.get("title") or f_url
+                error_feeds.append((title, err_count, f_info.get("last_error")))
+
+        if error_feeds:
+            error_lines = ["\n\n<b>Feeds with errors:</b>"]
+            for title, err_count, last_err in error_feeds[:10]:
+                err_detail = f": {html.escape(str(last_err))}" if last_err else ""
+                error_lines.append(f"• <b>{html.escape(title)}</b> ({err_count} error{'s' if err_count != 1 else ''}{err_detail})")
+            if len(error_feeds) > 10:
+                error_lines.append("...and more")
+            msg += "\n".join(error_lines)
+
         await update.effective_message.reply_html(msg)
 
     async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):

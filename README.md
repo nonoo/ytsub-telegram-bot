@@ -106,7 +106,7 @@ Each authorized user can independently connect their YouTube account and receive
   - `/custom add <url_or_channel_id>`: Add a custom RSS feed (supports raw feed URLs, YouTube channel IDs like `UC...`, channel URLs, and playlist URLs). The channel/author name is automatically extracted from the feed.
   - `/custom remove <number_or_url>`: Remove a custom feed by its list number or exact URL.
 - `/reload`: Reload the state from `ytsub-state.json` and perform RSS feed updates on channels updated more than 5 minutes ago (admin only).
-- `/status`: Show current tracking status (channels tracked, custom feeds, check interval, authentication state).
+- `/status`: Show current tracking status (channels tracked, custom feeds, check interval, authentication state, and any feeds with errors).
 - `/help`: Display the list of available commands.
 
 ## How it works

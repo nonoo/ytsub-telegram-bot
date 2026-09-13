@@ -467,5 +467,66 @@ async def test_cmd_custom_unauthorized():
         mock_reply_html.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_cmd_status():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+        params.check_interval_sec = 300
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+        setup_handlers(app, params, sm)
+
+        status_handler = next(h for h in registered_handlers if hasattr(h, "commands") and "status" in h.commands)
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 1001
+        mock_reply_html = AsyncMock()
+        mock_update.effective_message.reply_html = mock_reply_html
+        context = MagicMock()
+
+        # 1. No errors
+        sm.sync_user_channels(1001, {"UC_1": "Channel 1"})
+        await status_handler.callback(mock_update, context)
+        reply = mock_reply_html.call_args[0][0]
+        assert "Tracked channels: 1" in reply
+        assert "Feeds with errors:" not in reply
+
+        # 2. Feeds with errors (< 10)
+        sm.record_feed_error(1001, is_custom=False, key="UC_1", error_msg="HTTP 500")
+        sm.add_custom_feed(1001, "https://example.com/rss", "Custom Feed 1")
+        sm.record_feed_error(1001, is_custom=True, key="https://example.com/rss", error_msg="HTTP 404")
+
+        await status_handler.callback(mock_update, context)
+        reply = mock_reply_html.call_args[0][0]
+        assert "Feeds with errors:" in reply
+        assert "• <b>Channel 1</b> (1 error: HTTP 500)" in reply
+        assert "• <b>Custom Feed 1</b> (1 error: HTTP 404)" in reply
+        assert "...and more" not in reply
+
+        # 3. More than 10 feeds with errors
+        channels = {f"UC_{i}": f"Channel {i}" for i in range(2, 15)}
+        for ch_id, ch_title in channels.items():
+            sm.get_user(1001)["channels"][ch_id] = {
+                "title": ch_title,
+                "error_count": 3,
+                "last_error": "Connection timeout"
+            }
+        sm.save()
+
+        await status_handler.callback(mock_update, context)
+        reply = mock_reply_html.call_args[0][0]
+        assert "Feeds with errors:" in reply
+        # Should contain ...and more
+        assert "...and more" in reply
+        # Only 10 feed error items listed
+        lines = [line for line in reply.split("\n") if line.startswith("• <b>")]
+        assert len(lines) == 10
+
+
 
 

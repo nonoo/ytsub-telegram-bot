@@ -99,7 +99,7 @@ ytsub-telegram-bot/
   - `/update`: Refresh subscriptions (errors with prompt to `/start` if not authenticated).
   - `/custom`: Manage custom RSS feeds (subcommands: `list`, `add <url_or_channel_id>`, `remove <number_or_url>`).
   - `/reload`: Admin-only command. Reloads state from disk and checks channels/feeds older than 5 minutes.
-  - `/status`: Displays authenticated status, tracked channel count, custom feed count, check interval.
+  - `/status`: Displays authenticated status, tracked channel count, custom feed count, check interval, and any feeds with errors (capped at 10 items, with "...and more" if exceeding).
   - `/help`: Command summary (dynamically includes `/reload` only for admins).
   - Callback queries: Handles `reauth_*` confirmations, and `wl:*` / `ll:*` / `rwl:*` / `rll:*` playlist additions and removals with toggleable button states and toast confirmations.
 
