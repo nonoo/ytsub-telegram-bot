@@ -1,5 +1,6 @@
 import logging
 import sys
+from typing import Any, Optional
 
 from telegram.ext import ApplicationBuilder, ContextTypes
 
@@ -32,8 +33,13 @@ logger = logging.getLogger("ytsub")
 async def scheduled_rss_check(context: ContextTypes.DEFAULT_TYPE):
     state: StateManager = context.job.data["state"]
 
-    async def send_fn(chat_id: int, text: str):
-        await context.bot.send_message(chat_id=chat_id, text=text, disable_web_page_preview=False)
+    async def send_fn(chat_id: int, text: str, reply_markup: Optional[Any] = None):
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            disable_web_page_preview=False,
+            reply_markup=reply_markup
+        )
 
     try:
         await check_channels_and_notify(state=state, send_message_fn=send_fn)

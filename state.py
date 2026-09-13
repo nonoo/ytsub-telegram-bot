@@ -239,3 +239,19 @@ class StateManager:
         ch.pop("last_published_human", None)
 
         self.save()
+
+    def get_user_playlist(self, user_id: int, playlist_key: str) -> Optional[str]:
+        user = self.get_user(user_id)
+        return user.get("playlists", {}).get(playlist_key)
+
+    def set_user_playlist(self, user_id: int, playlist_key: str, playlist_id: str) -> None:
+        user = self.get_user(user_id)
+        user.setdefault("playlists", {})[playlist_key] = playlist_id
+        self.save()
+
+    def clear_user_playlist(self, user_id: int, playlist_key: str) -> None:
+        user = self.get_user(user_id)
+        if "playlists" in user and playlist_key in user["playlists"]:
+            del user["playlists"][playlist_key]
+            self.save()
+

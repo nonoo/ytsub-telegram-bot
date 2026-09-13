@@ -198,3 +198,175 @@ def test_telegram_get_updates_filter():
     assert f.filter(rec_keep) is True
 
 
+@pytest.mark.asyncio
+async def test_callback_playlist_action_watch_later():
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        sm.set_user_tokens(1001, "tok-test", "ref-test")
+
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+        params.google_client_id = "test-cid"
+        params.google_client_secret = "test-csec"
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        from telegram.ext import CallbackQueryHandler
+        playlist_handler = next(
+            h for h in registered_handlers
+            if isinstance(h, CallbackQueryHandler) and getattr(h, "pattern", None) and "wl" in h.pattern.pattern
+        )
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 1001
+        mock_query = AsyncMock()
+        mock_query.data = "wl:test_vid_1"
+        mock_query.message.reply_markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🕒 Watch Later", callback_data="wl:test_vid_1"),
+                InlineKeyboardButton("🎧 Listen Later", callback_data="ll:test_vid_1")
+            ]
+        ])
+        mock_update.callback_query = mock_query
+        context = MagicMock()
+
+        with patch("youtube.find_or_create_playlist") as mock_find_create, \
+             patch("youtube.add_video_to_playlist") as mock_add_video:
+            mock_find_create.return_value = ("PL_wl_id", None)
+            mock_add_video.return_value = (True, None)
+
+            await playlist_handler.callback(mock_update, context)
+
+            mock_find_create.assert_called_once_with(
+                client_id="test-cid",
+                client_secret="test-csec",
+                token="tok-test",
+                refresh_token="ref-test",
+                title="YTSub Watch Later"
+            )
+            mock_add_video.assert_called_once_with(
+                client_id="test-cid",
+                client_secret="test-csec",
+                token="tok-test",
+                refresh_token="ref-test",
+                playlist_id="PL_wl_id",
+                video_id="test_vid_1"
+            )
+            assert sm.get_user_playlist(1001, "watch_later") == "PL_wl_id"
+            mock_query.answer.assert_called_with("Added to YTSub Watch Later")
+
+            # Verify button text and callback_data updated
+            mock_query.edit_message_reply_markup.assert_called_once()
+            new_markup = mock_query.edit_message_reply_markup.call_args[1]["reply_markup"]
+            assert new_markup.inline_keyboard[0][0].text == "✅ Watch Later"
+            assert new_markup.inline_keyboard[0][0].callback_data == "rwl:test_vid_1"
+
+
+@pytest.mark.asyncio
+async def test_callback_playlist_action_toggle_removal():
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        sm.set_user_tokens(1001, "tok-test", "ref-test")
+        sm.set_user_playlist(1001, "watch_later", "PL_wl_id")
+
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+        params.google_client_id = "test-cid"
+        params.google_client_secret = "test-csec"
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        from telegram.ext import CallbackQueryHandler
+        playlist_handler = next(
+            h for h in registered_handlers
+            if isinstance(h, CallbackQueryHandler) and getattr(h, "pattern", None) and "rwl" in h.pattern.pattern
+        )
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 1001
+        mock_query = AsyncMock()
+        mock_query.data = "rwl:test_vid_1"
+        mock_query.message.reply_markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Watch Later", callback_data="rwl:test_vid_1"),
+                InlineKeyboardButton("🎧 Listen Later", callback_data="ll:test_vid_1")
+            ]
+        ])
+        mock_update.callback_query = mock_query
+        context = MagicMock()
+
+        with patch("youtube.remove_video_from_playlist") as mock_remove_video:
+            mock_remove_video.return_value = (True, None)
+
+            await playlist_handler.callback(mock_update, context)
+
+            mock_remove_video.assert_called_once_with(
+                client_id="test-cid",
+                client_secret="test-csec",
+                token="tok-test",
+                refresh_token="ref-test",
+                playlist_id="PL_wl_id",
+                video_id="test_vid_1"
+            )
+            mock_query.answer.assert_called_with("Removed from YTSub Watch Later")
+
+            # Verify button toggled back to initial state
+            mock_query.edit_message_reply_markup.assert_called_once()
+            new_markup = mock_query.edit_message_reply_markup.call_args[1]["reply_markup"]
+            assert new_markup.inline_keyboard[0][0].text == "🕒 Watch Later"
+            assert new_markup.inline_keyboard[0][0].callback_data == "wl:test_vid_1"
+
+
+
+@pytest.mark.asyncio
+async def test_callback_playlist_action_unauthenticated():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+        params.google_client_id = "test-cid"
+        params.google_client_secret = "test-csec"
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        from telegram.ext import CallbackQueryHandler
+        playlist_handler = next(
+            h for h in registered_handlers
+            if isinstance(h, CallbackQueryHandler) and getattr(h, "pattern", None) and "wl" in h.pattern.pattern
+        )
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 1001
+        mock_query = AsyncMock()
+        mock_query.data = "wl:test_vid_1"
+        mock_update.callback_query = mock_query
+        context = MagicMock()
+
+        await playlist_handler.callback(mock_update, context)
+        mock_query.answer.assert_called_with(
+            "Please connect your YouTube account with /start first.",
+            show_alert=True
+        )
+
+
+

@@ -21,7 +21,7 @@ Tested on Linux, but can run on any system with Python 3.
      - In the left sidebar, click **APIs & Services** > **OAuth consent screen**.
      - Select **External** user type and click **Create**.
      - Fill in **App name** (e.g. `YTSub`), **User support email**, and **Developer contact information** (your email). Click **Save and Continue**.
-     - On the **Scopes** page, click **Add or Remove Scopes**. Search for `YouTube Data API v3`, select the scope `.../auth/youtube.readonly` (*View your YouTube account*), click **Update**, then **Save and Continue**.
+     - On the **Scopes** page, click **Add or Remove Scopes**. Search for `YouTube Data API v3` (or `youtube.force-ssl`), select the scope `.../auth/youtube.force-ssl` (*See, edit, and permanently delete your YouTube videos, ratings, comments and captions*), click **Update**, then **Save and Continue**.
      - On the **Test users** page, click **+ Add Users**, enter the Google account email address you use for YouTube (and any other users who will connect), then click **Save and Continue**.
      - Click **Back to Dashboard**.
    - **Create OAuth Client Credentials**:
@@ -93,7 +93,7 @@ Each authorized user can independently connect their YouTube account and receive
 
 1. Send `/start` to the bot.
    - The bot immediately provides an authorization link.
-   - Click the link, sign in to your Google account, and grant read access to YouTube.
+   - Click the link, sign in to your Google account, and grant access to YouTube.
    - Copy the authorization code (or the full redirected URL) from your browser and paste it into the Telegram chat.
    - Once authenticated, the bot automatically downloads your list of subscribed channels.
 
@@ -111,10 +111,17 @@ Each authorized user can independently connect their YouTube account and receive
 2. **Periodic feed checks**: Every 5 minutes (configurable with `CHECK_INTERVAL_SEC`), the bot checks the YouTube Atom RSS feed (`https://www.youtube.com/feeds/videos.xml?channel_id=...`) for all tracked channels.
 3. **Targeted notifications**: When a new video upload is found, the bot sends a notification formatted as:
    ```
-   {channel_title} https://www.youtube.com/watch?v={video_id}
+   [{channel_title}] https://www.youtube.com/watch?v={video_id}
    ```
    only to users subscribed to that channel.
-4. **State persistence**: User access tokens and channel update timestamps are persisted atomically to `ytsub-state.json`.
+4. **Watch Later & Listen Later buttons**: Each video notification contains two inline action buttons:
+   - `🕒 Watch Later`: Adds the video to your private **`YTSub Watch Later`** playlist on YouTube.
+   - `🎧 Listen Later`: Adds the video to your private **`YTSub Listen Later`** playlist on YouTube.
+
+   *(Note: The YouTube Data API does not allow third-party applications to modify YouTube's default system "Watch Later" playlist, which is why a dedicated custom playlist named `YTSub Watch Later` is used instead.)*
+
+   Both playlists are created automatically in your YouTube library if they don't already exist. Clicking a button adds the video, switches the button to a checkmark (`✅ Watch Later` / `✅ Listen Later`), and displays a toast notification. Clicking a checkmarked button removes the video from the playlist and reverts the button back to its initial state.
+5. **State persistence**: User access tokens, cached playlist IDs, and channel update timestamps are persisted atomically to `ytsub-state.json`.
 
 ## Contributors
 

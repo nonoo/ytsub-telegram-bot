@@ -101,3 +101,22 @@ def test_update_channel_timestamps():
         assert "last_published_human" not in ch
         assert "UTC" in ch["last_checked"]
         assert "last_checked_human" not in ch
+
+
+def test_user_playlist_caching():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_file = os.path.join(tmpdir, "test-state.json")
+        sm = StateManager(state_file)
+
+        assert sm.get_user_playlist(1001, "watch_later") is None
+        sm.set_user_playlist(1001, "watch_later", "PL_wl_123")
+        assert sm.get_user_playlist(1001, "watch_later") == "PL_wl_123"
+
+        # Check persistence across reload
+        sm2 = StateManager(state_file)
+        sm2.load()
+        assert sm2.get_user_playlist(1001, "watch_later") == "PL_wl_123"
+
+        sm2.clear_user_playlist(1001, "watch_later")
+        assert sm2.get_user_playlist(1001, "watch_later") is None
+

@@ -62,8 +62,8 @@ async def test_check_channels_and_notify_user_isolation(caplog):
 
         sent_messages = []
 
-        async def mock_send(chat_id: int, text: str):
-            sent_messages.append((chat_id, text))
+        async def mock_send(chat_id: int, text: str, reply_markup=None):
+            sent_messages.append((chat_id, text, reply_markup))
 
         with patch("rss.fetch_channel_rss", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = SAMPLE_FEED
@@ -76,9 +76,16 @@ async def test_check_channels_and_notify_user_isolation(caplog):
             assert checked > 0
             # User 1 should get notified about vid222, but NOT vid111
             assert len(sent_messages) == 1
-            chat_id, text = sent_messages[0]
+            chat_id, text, reply_markup = sent_messages[0]
             assert chat_id == 101
-            assert text == "Channel X https://www.youtube.com/watch?v=vid222"
+            assert text == "[Channel X] https://www.youtube.com/watch?v=vid222"
+            assert reply_markup is not None
+            buttons = reply_markup.inline_keyboard[0]
+            assert len(buttons) == 2
+            assert buttons[0].text == "🕒 Watch Later"
+            assert buttons[0].callback_data == "wl:vid222"
+            assert buttons[1].text == "🎧 Listen Later"
+            assert buttons[1].callback_data == "ll:vid222"
 
             # Check that User 1's last_published was updated to vid222's timestamp
             u1_ch = sm.get_user(101)["channels"]["UC_X"]

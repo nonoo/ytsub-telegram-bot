@@ -68,11 +68,14 @@ ytsub-telegram-bot/
 - Encapsulates Google OAuth 2.0 and YouTube Data API v3 operations.
 - Hardwired constants:
   - `REDIRECT_URI`: `"http://localhost:8080/"`
-  - `SCOPES`: `["https://www.googleapis.com/auth/youtube.readonly"]`
+  - `SCOPES`: `["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/youtube.force-ssl"]`
 - Functions:
   - `generate_auth_url(client_id, client_secret)`: Initiates OAuth flow with offline consent.
   - `exchange_code_for_tokens(flow, code_or_url)`: Extracts code and exchanges for tokens.
   - `fetch_user_subscriptions(client_id, client_secret, token, refresh_token)`: Retrieves channels with pagination and handles automatic token refreshing.
+  - `find_or_create_playlist(client_id, client_secret, token, refresh_token, title)`: Finds or creates a private YouTube playlist (e.g. `YTSub Watch Later` or `YTSub Listen Later`).
+  - `add_video_to_playlist(client_id, client_secret, token, refresh_token, playlist_id, video_id)`: Appends a video to the specified YouTube playlist.
+  - `remove_video_from_playlist(client_id, client_secret, token, refresh_token, playlist_id, video_id)`: Finds and deletes items matching the video from the specified YouTube playlist.
 
 ### `rss.py`
 - Performs non-blocking async HTTP queries to YouTube Atom feeds:
@@ -80,7 +83,7 @@ ytsub-telegram-bot/
 - Parses `<entry>` tags using `xml.etree.ElementTree`.
 - Sorts video entries in chronological order (oldest first).
 - Logs each update (new video) found in the RSS feeds.
-- Dispatches notifications formatted as `{channel_title} https://www.youtube.com/watch?v={video_id}` only to the user(s) subscribed to each channel.
+- Dispatches notifications formatted as `[{channel_title}] https://www.youtube.com/watch?v={video_id}` with inline action buttons `🕒 Watch Later` and `🎧 Listen Later` only to the user(s) subscribed to each channel.
 - Supports `min_seconds_since_check` thresholding (used by `/reload` to filter channels checked > 300s ago).
 
 ### `handlers.py`
@@ -90,6 +93,7 @@ ytsub-telegram-bot/
   - `/reload`: Admin-only command. Reloads state from disk and checks channels older than 5 minutes.
   - `/status`: Displays authenticated status, tracked channel count, check interval.
   - `/help`: Command summary (dynamically includes `/reload` only for admins).
+  - Callback queries: Handles `reauth_*` confirmations, and `wl:*` / `ll:*` / `rwl:*` / `rll:*` playlist additions and removals with toggleable button states and toast confirmations.
 
 ### `main.py`
 - Instantiates `ApplicationBuilder`, attaches handlers, and schedules periodic RSS polling via `job_queue.run_repeating()`.
@@ -106,6 +110,10 @@ ytsub-telegram-bot/
     "123456789": {
       "token": "ya29.a0...",
       "refresh_token": "1//0e...",
+      "playlists": {
+        "watch_later": "PL...",
+        "listen_later": "PL..."
+      },
       "channels": {
         "UC_x5XG1OV2P6uZZ5FSM9Ttw": {
           "title": "Google Developers",

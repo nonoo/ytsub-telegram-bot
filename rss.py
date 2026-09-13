@@ -7,6 +7,7 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
 
 import aiohttp
 from dateutil import parser as date_parser
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from state import StateManager, parse_human_datetime, parse_human_timestamp, utc_now
 
@@ -155,9 +156,19 @@ async def check_channels_and_notify(
                                 entry.url,
                                 user_id
                             )
-                            message = f"{ch_title} {entry.url}"
+                            message = f"[{ch_title}] {entry.url}"
+                            keyboard = [
+                                [
+                                    InlineKeyboardButton("🕒 Watch Later", callback_data=f"wl:{entry.video_id}"),
+                                    InlineKeyboardButton("🎧 Listen Later", callback_data=f"ll:{entry.video_id}")
+                                ]
+                            ]
+                            reply_markup = InlineKeyboardMarkup(keyboard)
                             try:
-                                await send_message_fn(user_id, message)
+                                try:
+                                    await send_message_fn(user_id, message, reply_markup=reply_markup)
+                                except TypeError:
+                                    await send_message_fn(user_id, message)
                             except Exception as e:
                                 logger.error("Failed to send message to %s: %s", user_id, e)
 

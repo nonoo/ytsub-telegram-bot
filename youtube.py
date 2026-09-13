@@ -9,7 +9,10 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 
 REDIRECT_URI = "http://localhost:8080/"
-SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.force-ssl"
+]
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
@@ -107,3 +110,126 @@ def fetch_user_subscriptions(client_id: str, client_secret: str, token: str, ref
 
     refreshed_token = creds.token if creds.token != token else None
     return channels, refreshed_token
+
+
+def find_or_create_playlist(
+    client_id: str,
+    client_secret: str,
+    token: str,
+    refresh_token: str,
+    title: str
+) -> Tuple[str, Optional[str]]:
+    """
+    Finds a playlist by exact title in the user's account, or creates it as a private playlist.
+    Returns (playlist_id, new_access_token_if_refreshed).
+    """
+    creds = get_credentials(client_id, client_secret, token, refresh_token)
+    service = build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+    next_page_token = None
+    while True:
+        request = service.playlists().list(
+            part="snippet",
+            mine=True,
+            maxResults=50,
+            pageToken=next_page_token
+        )
+        response = request.execute()
+
+        for item in response.get("items", []):
+            snippet = item.get("snippet", {})
+            if snippet.get("title") == title:
+                playlist_id = item.get("id")
+                refreshed_token = creds.token if creds.token != token else None
+                return playlist_id, refreshed_token
+
+        next_page_token = response.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    # If not found, create it as a private playlist
+    insert_request = service.playlists().insert(
+        part="snippet,status",
+        body={
+            "snippet": {
+                "title": title,
+                "description": "Created by YTSub Telegram Bot"
+            },
+            "status": {
+                "privacyStatus": "private"
+            }
+        }
+    )
+    insert_response = insert_request.execute()
+    playlist_id = insert_response.get("id")
+    refreshed_token = creds.token if creds.token != token else None
+    return playlist_id, refreshed_token
+
+
+def add_video_to_playlist(
+    client_id: str,
+    client_secret: str,
+    token: str,
+    refresh_token: str,
+    playlist_id: str,
+    video_id: str
+) -> Tuple[bool, Optional[str]]:
+    """
+    Inserts a video into the specified playlist.
+    Returns (success, new_access_token_if_refreshed).
+    """
+    creds = get_credentials(client_id, client_secret, token, refresh_token)
+    service = build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+    request = service.playlistItems().insert(
+        part="snippet",
+        body={
+            "snippet": {
+                "playlistId": playlist_id,
+                "resourceId": {
+                    "kind": "youtube#video",
+                    "videoId": video_id
+                }
+            }
+        }
+    )
+    request.execute()
+    refreshed_token = creds.token if creds.token != token else None
+    return True, refreshed_token
+
+
+def remove_video_from_playlist(
+    client_id: str,
+    client_secret: str,
+    token: str,
+    refresh_token: str,
+    playlist_id: str,
+    video_id: str
+) -> Tuple[bool, Optional[str]]:
+    """
+    Finds and deletes any playlist item containing video_id from playlist_id.
+    Returns (success, new_access_token_if_refreshed).
+    """
+    if not playlist_id:
+        return True, None
+
+    creds = get_credentials(client_id, client_secret, token, refresh_token)
+    service = build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+    request = service.playlistItems().list(
+        part="id",
+        playlistId=playlist_id,
+        videoId=video_id,
+        maxResults=50
+    )
+    response = request.execute()
+
+    for item in response.get("items", []):
+        item_id = item.get("id")
+        if item_id:
+            service.playlistItems().delete(id=item_id).execute()
+
+    refreshed_token = creds.token if creds.token != token else None
+    return True, refreshed_token
+
+

@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -56,7 +56,7 @@ def setup_handlers(app, params: Params, state: StateManager):
                 "Welcome to <b>YTSub</b>!\n\n"
                 "To connect your YouTube account and read your subscriptions:\n\n"
                 f"1. 👉 <a href=\"{auth_url}\"><b>Click here to Authorize with Google</b></a>\n\n"
-                "2. Sign in and grant YouTube read access.\n"
+                "2. Sign in and grant YouTube access.\n"
                 "3. Copy the authorization code (or the full redirected URL) from your browser and paste it here."
             )
             await update.effective_message.reply_html(msg, disable_web_page_preview=True)
@@ -146,7 +146,7 @@ def setup_handlers(app, params: Params, state: StateManager):
                 user_sessions.pop(user_id, None)
                 user_flows.pop(user_id, None)
 
-                await update.effective_message.reply_text("Authentication successful! Downloading subscribed channels...")
+                await update.effective_message.reply_text("Authentication successful. Downloading subscribed channels...")
                 await perform_sync_subscriptions(update, user_id)
             except Exception as e:
                 logger.error("Failed to exchange code for %s: %s", user_id, e)
@@ -181,8 +181,13 @@ def setup_handlers(app, params: Params, state: StateManager):
 
         state.reload()
 
-        async def send_fn(target_chat_id: int, text: str):
-            await app.bot.send_message(chat_id=target_chat_id, text=text, disable_web_page_preview=False)
+        async def send_fn(target_chat_id: int, text: str, reply_markup: Optional[Any] = None):
+            await app.bot.send_message(
+                chat_id=target_chat_id,
+                text=text,
+                disable_web_page_preview=False,
+                reply_markup=reply_markup
+            )
 
         # Check channels updated more than 5 minutes (300 seconds) ago across all users
         checked = await check_channels_and_notify(
@@ -233,10 +238,172 @@ def setup_handlers(app, params: Params, state: StateManager):
         msg = "<b>YTSub Commands:</b>\n\n" + "\n".join(commands)
         await update.effective_message.reply_html(msg)
 
+    async def callback_playlist_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user = update.effective_user
+        if not user or not params.is_user_allowed(user.id):
+            await query.answer("Access denied.", show_alert=True)
+            return
+
+        user_id = user.id
+        data = query.data or ""
+        if not (data.startswith("wl:") or data.startswith("ll:") or data.startswith("rwl:") or data.startswith("rll:")):
+            await query.answer()
+            return
+
+        action, video_id = data.split(":", 1)
+        is_remove = action.startswith("r")
+        base_action = action[1:] if is_remove else action
+
+        user_info = state.get_user(user_id)
+        token = user_info.get("token")
+        refresh_token = user_info.get("refresh_token")
+        if not (token or refresh_token):
+            await query.answer("Please connect your YouTube account with /start first.", show_alert=True)
+            return
+
+        client_id = params.google_client_id
+        client_secret = params.google_client_secret
+        if not (client_id and client_secret):
+            await query.answer("Google credentials not configured on the bot server.", show_alert=True)
+            return
+
+        if base_action == "wl":
+            playlist_key = "watch_later"
+            target_title = "YTSub Watch Later"
+            unadded_text = "🕒 Watch Later"
+            added_text = "✅ Watch Later"
+            add_cb = f"wl:{video_id}"
+            remove_cb = f"rwl:{video_id}"
+        else:
+            playlist_key = "listen_later"
+            target_title = "YTSub Listen Later"
+            unadded_text = "🎧 Listen Later"
+            added_text = "✅ Listen Later"
+            add_cb = f"ll:{video_id}"
+            remove_cb = f"rll:{video_id}"
+
+        try:
+            playlist_id = state.get_user_playlist(user_id, playlist_key)
+
+            if is_remove:
+                # Remove from playlist
+                if playlist_id:
+                    try:
+                        _, refreshed_tok = youtube.remove_video_from_playlist(
+                            client_id=client_id,
+                            client_secret=client_secret,
+                            token=token,
+                            refresh_token=refresh_token,
+                            playlist_id=playlist_id,
+                            video_id=video_id
+                        )
+                        if refreshed_tok:
+                            state.set_user_tokens(user_id, token=refreshed_tok, refresh_token=refresh_token)
+                    except Exception as e:
+                        err_str = str(e)
+                        if "playlistNotFound" in err_str or "404" in err_str:
+                            state.clear_user_playlist(user_id, playlist_key)
+                        else:
+                            raise
+
+                await query.answer(f"Removed from {target_title}")
+                next_text = unadded_text
+                next_cb = add_cb
+            else:
+                # Add to playlist
+                if not playlist_id:
+                    playlist_id, refreshed_tok = youtube.find_or_create_playlist(
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        token=token,
+                        refresh_token=refresh_token,
+                        title=target_title
+                    )
+                    if refreshed_tok:
+                        state.set_user_tokens(user_id, token=refreshed_tok, refresh_token=refresh_token)
+                        token = refreshed_tok
+                    state.set_user_playlist(user_id, playlist_key, playlist_id)
+
+                try:
+                    _, refreshed_tok = youtube.add_video_to_playlist(
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        token=token,
+                        refresh_token=refresh_token,
+                        playlist_id=playlist_id,
+                        video_id=video_id
+                    )
+                    if refreshed_tok:
+                        state.set_user_tokens(user_id, token=refreshed_tok, refresh_token=refresh_token)
+                except Exception as e:
+                    err_str = str(e)
+                    if "playlistNotFound" in err_str or "404" in err_str:
+                        state.clear_user_playlist(user_id, playlist_key)
+                        playlist_id, refreshed_tok = youtube.find_or_create_playlist(
+                            client_id=client_id,
+                            client_secret=client_secret,
+                            token=token,
+                            refresh_token=refresh_token,
+                            title=target_title
+                        )
+                        if refreshed_tok:
+                            state.set_user_tokens(user_id, token=refreshed_tok, refresh_token=refresh_token)
+                            token = refreshed_tok
+                        state.set_user_playlist(user_id, playlist_key, playlist_id)
+
+                        _, refreshed_tok = youtube.add_video_to_playlist(
+                            client_id=client_id,
+                            client_secret=client_secret,
+                            token=token,
+                            refresh_token=refresh_token,
+                            playlist_id=playlist_id,
+                            video_id=video_id
+                        )
+                        if refreshed_tok:
+                            state.set_user_tokens(user_id, token=refreshed_tok, refresh_token=refresh_token)
+                    else:
+                        raise
+
+                await query.answer(f"Added to {target_title}")
+                next_text = added_text
+                next_cb = remove_cb
+
+            # Update inline button
+            if query.message and query.message.reply_markup:
+                new_keyboard = []
+                for row in query.message.reply_markup.inline_keyboard:
+                    new_row = []
+                    for btn in row:
+                        if btn.callback_data == data:
+                            new_row.append(
+                                InlineKeyboardButton(
+                                    next_text,
+                                    callback_data=next_cb
+                                )
+                            )
+                        else:
+                            new_row.append(btn)
+                    new_keyboard.append(new_row)
+                try:
+                    await query.edit_message_reply_markup(
+                        reply_markup=InlineKeyboardMarkup(new_keyboard)
+                    )
+                except Exception as edit_err:
+                    logger.debug("Failed to edit reply markup: %s", edit_err)
+
+        except Exception as e:
+            action_name = "removing" if is_remove else "adding"
+            logger.error("Error %s video %s to playlist '%s': %s", action_name, video_id, target_title, e)
+            await query.answer(f"Failed: {e}", show_alert=True)
+
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("update", cmd_update))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CallbackQueryHandler(callback_reauth))
+    app.add_handler(CallbackQueryHandler(callback_reauth, pattern=r"^reauth_"))
+    app.add_handler(CallbackQueryHandler(callback_playlist_action, pattern=r"^(wl|ll|rwl|rll):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+
