@@ -25,6 +25,7 @@ ytsub-telegram-bot/
 ├── .venv/                        # Host Python virtual environment (ignored in git)
 ├── AGENTS.md                     # Architecture reference for AI agents
 ├── Dockerfile                    # Container definition (no venv inside container)
+├── LICENSE                       # MIT License
 ├── README.md                     # User-facing setup & usage documentation
 ├── config.inc.sh-example         # Template for environment variables
 ├── params.py                     # Command-line & environment configuration parser

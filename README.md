@@ -130,3 +130,8 @@ Each authorized user can independently connect their YouTube account and receive
 ## Donations
 
 If you find this bot useful then [buy me a beer](https://paypal.me/ha2non). :)
+
+## License
+
+[MIT](LICENSE)
+
