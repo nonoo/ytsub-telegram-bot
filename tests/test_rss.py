@@ -131,3 +131,92 @@ async def test_min_seconds_since_check_filter():
                 min_seconds_since_check=300.0
             )
             assert checked == 1
+
+
+def test_normalize_feed_url():
+    from rss import normalize_feed_url
+
+    # Channel ID
+    assert normalize_feed_url("UC_x5XG1OV2P6uZZ5FSM9Ttw") == "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw"
+
+    # YouTube Channel URL
+    assert normalize_feed_url("https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw") == "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw"
+
+    # YouTube Playlist URL
+    assert normalize_feed_url("https://www.youtube.com/playlist?list=PL1234567890abcdef") == "https://www.youtube.com/feeds/videos.xml?playlist_id=PL1234567890abcdef"
+
+    # Arbitrary feed URL
+    assert normalize_feed_url("https://example.com/custom.xml") == "https://example.com/custom.xml"
+
+
+def test_parse_feed_with_author():
+    from rss import parse_feed
+
+    atom_with_author = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <title>Feed Title Fallback</title>
+  <author>
+    <name>Channel Author Name</name>
+    <uri>https://www.youtube.com/channel/UC_X</uri>
+  </author>
+  <entry>
+    <id>yt:video:vid333</id>
+    <yt:videoId>vid333</yt:videoId>
+    <title>Video 3</title>
+    <published>2026-09-13T10:00:00+00:00</published>
+  </entry>
+</feed>"""
+
+    author, entries = parse_feed(atom_with_author)
+    assert author == "Channel Author Name"
+    assert len(entries) == 1
+    assert entries[0].video_id == "vid333"
+
+
+@pytest.mark.asyncio
+async def test_check_custom_feeds_and_notify():
+    from rss import check_channels_and_notify
+
+    custom_feed_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <author>
+    <name>Custom Author</name>
+  </author>
+  <entry>
+    <id>yt:video:cust1</id>
+    <yt:videoId>cust1</yt:videoId>
+    <title>Custom Video 1</title>
+    <published>2026-09-13T10:00:00+00:00</published>
+  </entry>
+</feed>"""
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        feed_url = "https://custom.feed/rss.xml"
+        sm.add_custom_feed(101, feed_url, "Custom Author")
+        # Set last_published to before the video
+        sm.update_custom_feed_timestamps(101, feed_url, last_published="2026-09-13 09:00:00 UTC")
+
+        sent_messages = []
+
+        async def mock_send(chat_id: int, text: str, reply_markup=None):
+            sent_messages.append((chat_id, text, reply_markup))
+
+        with patch("rss.fetch_feed_url", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = custom_feed_xml
+
+            checked = await check_channels_and_notify(
+                state=sm,
+                send_message_fn=mock_send
+            )
+
+            assert checked == 1
+            assert len(sent_messages) == 1
+            chat_id, text, reply_markup = sent_messages[0]
+            assert chat_id == 101
+            assert text == "[Custom Author] https://www.youtube.com/watch?v=cust1"
+            assert reply_markup is not None
+            buttons = reply_markup.inline_keyboard[0]
+            assert buttons[0].callback_data == "wl:cust1"
+            assert buttons[1].callback_data == "ll:cust1"
+

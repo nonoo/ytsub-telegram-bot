@@ -369,4 +369,95 @@ async def test_callback_playlist_action_unauthenticated():
         )
 
 
+@pytest.mark.asyncio
+async def test_cmd_custom_list_and_manage():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        custom_handler = next(h for h in registered_handlers if hasattr(h, "commands") and "custom" in h.commands)
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 1001
+        mock_reply_html = AsyncMock()
+        mock_update.effective_message.reply_html = mock_reply_html
+        mock_reply_text = AsyncMock()
+        mock_update.effective_message.reply_text = mock_reply_text
+
+        context = MagicMock()
+
+        # 1. /custom with no feeds
+        context.args = []
+        await custom_handler.callback(mock_update, context)
+        assert "no custom feeds configured" in mock_reply_html.call_args[0][0].lower()
+
+        # 2. /custom add UC_x5XG1OV2P6uZZ5FSM9Ttw
+        sample_feed = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <author><name>Google Developers</name></author>
+  <entry><yt:videoId>v1</yt:videoId><title>Title 1</title></entry>
+</feed>"""
+        context.args = ["add", "UC_x5XG1OV2P6uZZ5FSM9Ttw"]
+        with patch("handlers.fetch_feed_url", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = sample_feed
+            await custom_handler.callback(mock_update, context)
+            assert "Added custom feed: <b>Google Developers</b>" in mock_reply_html.call_args[0][0]
+
+        # Check state
+        feeds = sm.get_user_custom_feeds(1001)
+        assert len(feeds) == 1
+        expected_url = "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw"
+        assert expected_url in feeds
+        assert feeds[expected_url]["title"] == "Google Developers"
+
+        # 3. /custom list
+        context.args = ["list"]
+        await custom_handler.callback(mock_update, context)
+        reply = mock_reply_html.call_args[0][0]
+        assert "1. <b>Google Developers</b>" in reply
+        assert expected_url in reply
+
+        # 4. /custom remove 1
+        context.args = ["remove", "1"]
+        await custom_handler.callback(mock_update, context)
+        assert "Removed custom feed: <b>Google Developers</b>" in mock_reply_html.call_args[0][0]
+        assert len(sm.get_user_custom_feeds(1001)) == 0
+
+
+@pytest.mark.asyncio
+async def test_cmd_custom_unauthorized():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        custom_handler = next(h for h in registered_handlers if hasattr(h, "commands") and "custom" in h.commands)
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 9999  # unauthorized
+        mock_reply_html = AsyncMock()
+        mock_update.effective_message.reply_html = mock_reply_html
+
+        context = MagicMock()
+        context.args = ["list"]
+        await custom_handler.callback(mock_update, context)
+        mock_reply_html.assert_not_called()
+
+
+
 

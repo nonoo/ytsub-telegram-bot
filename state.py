@@ -154,9 +154,13 @@ class StateManager:
             self.data["users"][uid] = {
                 "token": "",
                 "refresh_token": "",
-                "channels": {}
+                "channels": {},
+                "custom_feeds": {}
             }
-        return self.data["users"][uid]
+        user = self.data["users"][uid]
+        if "custom_feeds" not in user:
+            user["custom_feeds"] = {}
+        return user
 
     def has_user_oauth_credentials(self, user_id: int) -> bool:
         uid = str(user_id)
@@ -254,4 +258,92 @@ class StateManager:
         if "playlists" in user and playlist_key in user["playlists"]:
             del user["playlists"][playlist_key]
             self.save()
+
+    def get_user_custom_feeds(self, user_id: int) -> Dict[str, Dict[str, Any]]:
+        user = self.get_user(user_id)
+        return user.setdefault("custom_feeds", {})
+
+    def add_custom_feed(self, user_id: int, url: str, title: str) -> bool:
+        """
+        Adds a custom feed for the user with initial timestamps set to now.
+        Returns True if newly added, False if already existed.
+        """
+        user = self.get_user(user_id)
+        feeds = user.setdefault("custom_feeds", {})
+        now_human = format_human_timestamp()
+        is_new = url not in feeds
+        if is_new:
+            feeds[url] = {
+                "title": title,
+                "url": url,
+                "last_published": now_human,
+                "last_checked": now_human
+            }
+        else:
+            feeds[url]["title"] = title
+            feeds[url]["url"] = url
+        self.save()
+        return is_new
+
+    def remove_custom_feed(self, user_id: int, identifier: str) -> Optional[Dict[str, Any]]:
+        """
+        Removes a custom feed by 1-based index or by exact URL.
+        Returns the removed feed dict (including 'title' and 'url') if found, or None.
+        """
+        user = self.get_user(user_id)
+        feeds = user.get("custom_feeds", {})
+        target_url = None
+
+        ident_str = str(identifier).strip()
+        if ident_str.isdigit():
+            idx = int(ident_str)
+            keys = list(feeds.keys())
+            if 1 <= idx <= len(keys):
+                target_url = keys[idx - 1]
+
+        if not target_url:
+            if ident_str in feeds:
+                target_url = ident_str
+            else:
+                for u in feeds.keys():
+                    if u.lower() == ident_str.lower():
+                        target_url = u
+                        break
+
+        if target_url and target_url in feeds:
+            removed = feeds.pop(target_url)
+            self.save()
+            return removed
+        return None
+
+    def update_custom_feed_timestamps(
+        self,
+        user_id: int,
+        url: str,
+        last_published: Optional[Union[str, datetime]] = None,
+        last_checked_epoch: Optional[float] = None,
+        last_checked: Optional[str] = None,
+    ) -> None:
+        user = self.get_user(user_id)
+        feeds = user.get("custom_feeds", {})
+        if url not in feeds:
+            return
+
+        feed = feeds[url]
+        if last_published is not None:
+            if isinstance(last_published, datetime):
+                feed["last_published"] = format_human_timestamp(dt=last_published)
+            elif isinstance(last_published, str) and last_published.endswith(" UTC"):
+                feed["last_published"] = last_published
+            else:
+                dt = parse_human_datetime(last_published)
+                feed["last_published"] = format_human_timestamp(dt=dt) if dt else str(last_published)
+
+        if last_checked is not None:
+            feed["last_checked"] = last_checked
+        elif last_checked_epoch is not None:
+            feed["last_checked"] = format_human_timestamp(epoch=last_checked_epoch)
+
+        self.save()
+
 

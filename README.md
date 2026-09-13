@@ -101,19 +101,23 @@ Each authorized user can independently connect their YouTube account and receive
 
 - `/start`: Connect or re-authenticate your YouTube account via OAuth 2.0. If credentials already exist, prompts for confirmation before redoing the flow.
 - `/update`: Refresh and synchronize your subscribed YouTube channels from YouTube Data API v3.
+- `/custom`: Manage additional custom RSS feeds:
+  - `/custom` or `/custom list`: List your configured custom feeds.
+  - `/custom add <url_or_channel_id>`: Add a custom RSS feed (supports raw feed URLs, YouTube channel IDs like `UC...`, channel URLs, and playlist URLs). The channel/author name is automatically extracted from the feed.
+  - `/custom remove <number_or_url>`: Remove a custom feed by its list number or exact URL.
 - `/reload`: Reload the state from `ytsub-state.json` and perform RSS feed updates on channels updated more than 5 minutes ago (admin only).
-- `/status`: Show current tracking status (channels tracked, check interval, authentication state).
+- `/status`: Show current tracking status (channels tracked, custom feeds, check interval, authentication state).
 - `/help`: Display the list of available commands.
 
 ## How it works
 
-1. **New channel subscriptions**: When channels are first added to your account, existing videos are not spammed. The current timestamp is recorded in `ytsub-state.json`.
-2. **Periodic feed checks**: Every 5 minutes (configurable with `CHECK_INTERVAL_SEC`), the bot checks the YouTube Atom RSS feed (`https://www.youtube.com/feeds/videos.xml?channel_id=...`) for all tracked channels.
+1. **New channel subscriptions & custom feeds**: When channels or custom feeds are first added, existing videos are not spammed. The current timestamp is recorded in `ytsub-state.json`.
+2. **Periodic feed checks**: Every 5 minutes (configurable with `CHECK_INTERVAL_SEC`), the bot checks Atom/RSS feeds for all tracked YouTube channels and custom feeds. Unique feed URLs are polled concurrently and deduplicated.
 3. **Targeted notifications**: When a new video upload is found, the bot sends a notification formatted as:
    ```
    [{channel_title}] https://www.youtube.com/watch?v={video_id}
    ```
-   only to users subscribed to that channel.
+   only to users subscribed to that channel or custom feed.
 4. **Watch Later & Listen Later buttons**: Each video notification contains two inline action buttons:
    - `🕒 Watch Later`: Adds the video to your private **`YTSub Watch Later`** playlist on YouTube.
    - `🎧 Listen Later`: Adds the video to your private **`YTSub Listen Later`** playlist on YouTube.

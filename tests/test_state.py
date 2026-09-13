@@ -120,3 +120,69 @@ def test_user_playlist_caching():
         sm2.clear_user_playlist(1001, "watch_later")
         assert sm2.get_user_playlist(1001, "watch_later") is None
 
+
+def test_custom_feeds_state():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_file = os.path.join(tmpdir, "test-state.json")
+        sm = StateManager(state_file)
+
+        feed_url1 = "https://www.youtube.com/feeds/videos.xml?channel_id=UC_TEST1"
+        feed_url2 = "https://www.youtube.com/feeds/videos.xml?channel_id=UC_TEST2"
+
+        # Add feeds
+        assert sm.add_custom_feed(1001, feed_url1, "Channel 1") is True
+        assert sm.add_custom_feed(1001, feed_url2, "Channel 2") is True
+        # Re-adding returns False
+        assert sm.add_custom_feed(1001, feed_url1, "Channel 1 Updated") is False
+
+        feeds = sm.get_user_custom_feeds(1001)
+        assert len(feeds) == 2
+        assert feeds[feed_url1]["title"] == "Channel 1 Updated"
+        assert "UTC" in feeds[feed_url1]["last_published"]
+        assert "UTC" in feeds[feed_url1]["last_checked"]
+
+        # Update timestamps
+        sm.update_custom_feed_timestamps(
+            1001,
+            feed_url1,
+            last_published="2026-09-13 12:00:00 UTC",
+            last_checked_epoch=1789377164.0
+        )
+        assert feeds[feed_url1]["last_published"] == "2026-09-13 12:00:00 UTC"
+
+        # Remove by index "1"
+        removed1 = sm.remove_custom_feed(1001, "1")
+        assert removed1 is not None
+        assert removed1["url"] == feed_url1
+        assert len(sm.get_user_custom_feeds(1001)) == 1
+
+        # Remove by URL
+        removed2 = sm.remove_custom_feed(1001, feed_url2)
+        assert removed2 is not None
+        assert removed2["url"] == feed_url2
+        assert len(sm.get_user_custom_feeds(1001)) == 0
+
+        # Remove non-existent returns None
+        assert sm.remove_custom_feed(1001, "999") is None
+
+
+def test_sync_preserves_custom_feeds():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_file = os.path.join(tmpdir, "test-state.json")
+        sm = StateManager(state_file)
+
+        feed_url = "https://www.youtube.com/feeds/videos.xml?channel_id=UC_CUSTOM"
+        sm.add_custom_feed(1001, feed_url, "Custom Channel")
+
+        # Sync subscriptions from YouTube
+        sm.sync_user_channels(1001, {"UC_A": "Channel A"})
+
+        # Verify custom feeds are not deleted by sync_user_channels
+        feeds = sm.get_user_custom_feeds(1001)
+        assert feed_url in feeds
+        assert feeds[feed_url]["title"] == "Custom Channel"
+
+        # Verify channels are updated properly
+        assert "UC_A" in sm.get_user(1001)["channels"]
+
+

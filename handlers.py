@@ -1,7 +1,9 @@
+import html
 import json
 import logging
 from typing import Any, Dict, Optional
 
+import aiohttp
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     CallbackQueryHandler,
@@ -12,7 +14,12 @@ from telegram.ext import (
 )
 
 from params import Params
-from rss import check_channels_and_notify
+from rss import (
+    check_channels_and_notify,
+    fetch_feed_url,
+    normalize_feed_url,
+    parse_feed,
+)
 from state import StateManager
 import youtube
 
@@ -200,6 +207,95 @@ def setup_handlers(app, params: Params, state: StateManager):
             f"State reloaded from disk. Checked {checked} channel(s) updated more than 5 minutes ago."
         )
 
+    async def cmd_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await check_access(update):
+            return
+
+        user_id = update.effective_user.id
+        args = context.args or []
+        subcmd = args[0].lower() if args else "list"
+
+        if subcmd == "list":
+            custom_feeds = state.get_user_custom_feeds(user_id)
+            if not custom_feeds:
+                msg = (
+                    "You have no custom feeds configured.\n\n"
+                    "Use <code>/custom add &lt;url or channel_id&gt;</code> to add one."
+                )
+                await update.effective_message.reply_html(msg)
+                return
+
+            lines = ["<b>Custom RSS Feeds:</b>\n"]
+            for idx, (url, info) in enumerate(custom_feeds.items(), 1):
+                title = info.get("title") or "Unknown"
+                lines.append(f"{idx}. <b>{html.escape(title)}</b>\n   <code>{html.escape(url)}</code>")
+
+            lines.append("\nTo remove a feed, use:\n<code>/custom remove &lt;number or url&gt;</code>")
+            await update.effective_message.reply_html("\n".join(lines))
+
+        elif subcmd == "add":
+            if len(args) < 2:
+                await update.effective_message.reply_html(
+                    "Usage: <code>/custom add &lt;url or channel_id&gt;</code>"
+                )
+                return
+
+            raw_input = args[1].strip()
+            url = normalize_feed_url(raw_input)
+            if not (url.startswith("http://") or url.startswith("https://")):
+                await update.effective_message.reply_text("Invalid URL or channel ID.")
+                return
+
+            async with aiohttp.ClientSession() as session:
+                xml_text = await fetch_feed_url(session, url)
+
+            if not xml_text:
+                await update.effective_message.reply_text(
+                    f"Failed to fetch feed from URL. Please check that the URL is reachable:\n{url}"
+                )
+                return
+
+            feed_author, entries = parse_feed(xml_text)
+            feed_title = feed_author or (entries[0].title if entries else "") or raw_input
+
+            is_new = state.add_custom_feed(user_id=user_id, url=url, title=feed_title)
+            if is_new:
+                await update.effective_message.reply_html(
+                    f"Added custom feed: <b>{html.escape(feed_title)}</b>\n<code>{html.escape(url)}</code>"
+                )
+            else:
+                await update.effective_message.reply_html(
+                    f"Updated custom feed: <b>{html.escape(feed_title)}</b>\n<code>{html.escape(url)}</code>"
+                )
+
+        elif subcmd == "remove":
+            if len(args) < 2:
+                await update.effective_message.reply_html(
+                    "Usage: <code>/custom remove &lt;number or url&gt;</code>"
+                )
+                return
+
+            target = args[1].strip()
+            removed = state.remove_custom_feed(user_id=user_id, identifier=target)
+            if removed:
+                removed_title = removed.get("title") or removed.get("url") or target
+                await update.effective_message.reply_html(
+                    f"Removed custom feed: <b>{html.escape(removed_title)}</b>"
+                )
+            else:
+                await update.effective_message.reply_html(
+                    "Feed not found. Use <code>/custom list</code> to see your feeds."
+                )
+
+        else:
+            msg = (
+                "<b>Custom Feed Commands:</b>\n\n"
+                "• <code>/custom</code> or <code>/custom list</code> - List your custom feeds\n"
+                "• <code>/custom add &lt;url or channel_id&gt;</code> - Add a custom RSS feed\n"
+                "• <code>/custom remove &lt;number or url&gt;</code> - Remove a custom RSS feed"
+            )
+            await update.effective_message.reply_html(msg)
+
     async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await check_access(update):
             return
@@ -208,11 +304,13 @@ def setup_handlers(app, params: Params, state: StateManager):
         has_creds = state.has_user_oauth_credentials(user_id)
         user_info = state.get_user(user_id)
         channel_count = len(user_info.get("channels", {}))
+        custom_feed_count = len(user_info.get("custom_feeds", {}))
 
         msg = (
             f"<b>YTSub Bot Status</b>\n"
             f"• Authenticated: {'Yes' if has_creds else 'No'}\n"
             f"• Tracked channels: {channel_count}\n"
+            f"• Custom feeds: {custom_feed_count}\n"
             f"• Check interval: {params.check_interval_sec} seconds"
         )
         await update.effective_message.reply_html(msg)
@@ -227,6 +325,7 @@ def setup_handlers(app, params: Params, state: StateManager):
         commands = [
             "/start - Connect or re-authenticate your YouTube account",
             "/update - Redownload list of subscribed channels",
+            "/custom - Manage custom RSS feeds (list/add/remove)",
         ]
         if is_admin:
             commands.append("/reload - Reload state from disk and check channels updated >5 min ago")
@@ -399,6 +498,7 @@ def setup_handlers(app, params: Params, state: StateManager):
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("update", cmd_update))
+    app.add_handler(CommandHandler("custom", cmd_custom))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("help", cmd_help))
