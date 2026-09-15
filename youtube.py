@@ -1,10 +1,15 @@
+import asyncio
 import logging
-from typing import Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+
+if TYPE_CHECKING:
+    from params import Params
+    from state import StateManager
 
 logger = logging.getLogger(__name__)
 
@@ -231,5 +236,110 @@ def remove_video_from_playlist(
 
     refreshed_token = creds.token if creds.token != token else None
     return True, refreshed_token
+
+
+def format_channel_delta_log(added_titles: List[str], removed_titles: List[str]) -> Optional[str]:
+    """
+    Formats the delta of added and removed channel titles for logging.
+    If there are more than 10 channels in a row, adds ', and more'.
+    Returns None if neither added nor removed channels exist.
+    """
+    lines = []
+    if added_titles:
+        added_str = ", ".join(added_titles[:10]) + (", and more" if len(added_titles) > 10 else "")
+        lines.append(f"Added channels: {added_str}")
+    if removed_titles:
+        removed_str = ", ".join(removed_titles[:10]) + (", and more" if len(removed_titles) > 10 else "")
+        lines.append(f"Removed channels: {removed_str}")
+    if lines:
+        return "\n".join(lines)
+    return None
+
+
+async def sync_user_subscriptions(
+    state: "StateManager",
+    params: "Params",
+    user_id: int,
+    send_message_fn: Optional[Callable[[int, str], Awaitable[Any]]] = None,
+) -> Tuple[int, int]:
+    """
+    Synchronizes YouTube channel subscriptions for a given user.
+    Returns (total_channels_count, newly_added_count).
+    """
+    client_id = params.google_client_id
+    client_secret = params.google_client_secret
+    user_info = state.get_user(user_id)
+    token = user_info.get("token", "")
+    refresh_token = user_info.get("refresh_token", "")
+
+    if not (token or refresh_token):
+        raise ValueError(f"User {user_id} does not have OAuth credentials.")
+
+    channels, refreshed_token = await asyncio.to_thread(
+        fetch_user_subscriptions, client_id, client_secret, token, refresh_token
+    )
+    if refreshed_token:
+        state.set_user_tokens(user_id, token=refreshed_token, refresh_token=refresh_token)
+
+    existing_channels = user_info.get("channels", {})
+    added_titles = [title for ch_id, title in channels.items() if ch_id not in existing_channels]
+    removed_titles = [
+        ch_data.get("title") or ch_id
+        for ch_id, ch_data in existing_channels.items()
+        if ch_id not in channels
+    ]
+
+    new_count = state.sync_user_channels(user_id, channels)
+
+    delta_msg = format_channel_delta_log(added_titles, removed_titles)
+    if delta_msg:
+        logger.info("%s", delta_msg)
+        if send_message_fn:
+            try:
+                await send_message_fn(user_id, delta_msg)
+            except Exception as e:
+                logger.warning("Failed to send subscription update message to user %s: %s", user_id, e)
+
+    return len(channels), new_count
+
+
+async def sync_all_subscriptions(
+    state: "StateManager",
+    params: "Params",
+    send_message_fn: Optional[Callable[[int, str], Awaitable[Any]]] = None,
+) -> Dict[int, Tuple[int, int]]:
+    """
+    Syncs subscriptions for all allowed users with OAuth credentials.
+    Returns a dict mapping user_id -> (total_channels, newly_added_count).
+    """
+    if not params.google_client_id or not params.google_client_secret:
+        logger.warning("Google OAuth credentials are not configured. Skipping subscription sync.")
+        return {}
+
+    results = {}
+    users_data = state.data.get("users", {})
+    for uid_str, user_info in list(users_data.items()):
+        try:
+            uid = int(uid_str)
+        except ValueError:
+            continue
+
+        if not params.is_user_allowed(uid):
+            continue
+
+        if not (user_info.get("token") or user_info.get("refresh_token")):
+            continue
+
+        try:
+            total, new_count = await sync_user_subscriptions(
+                state, params, uid, send_message_fn=send_message_fn
+            )
+            results[uid] = (total, new_count)
+            logger.info("Synced subscriptions for user %d: %d total (%d newly added).", uid, total, new_count)
+        except Exception as e:
+            logger.error("Failed to sync subscriptions for user %d: %s", uid, e)
+
+    return results
+
 
 

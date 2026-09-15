@@ -1,3 +1,4 @@
+import asyncio
 import html
 import json
 import logging
@@ -108,19 +109,13 @@ def setup_handlers(app, params: Params, state: StateManager):
             await query.edit_message_text("Re-authentication cancelled.")
 
     async def perform_sync_subscriptions(update: Update, user_id: int):
-        client_id = params.google_client_id
-        client_secret = params.google_client_secret
-        user_info = state.get_user(user_id)
-        token = user_info.get("token", "")
-        refresh_token = user_info.get("refresh_token", "")
+        async def send_fn(uid: int, text: str):
+            await update.effective_message.reply_text(text)
 
         try:
-            channels, refreshed_token = youtube.fetch_user_subscriptions(client_id, client_secret, token, refresh_token)
-            if refreshed_token:
-                state.set_user_tokens(user_id, token=refreshed_token, refresh_token=refresh_token)
-
-            new_count = state.sync_user_channels(user_id, channels)
-            total = len(channels)
+            total, new_count = await youtube.sync_user_subscriptions(
+                state, params, user_id, send_message_fn=send_fn
+            )
             await update.effective_message.reply_text(
                 f"Successfully synced subscriptions.\n"
                 f"Total channels tracked: {total} ({new_count} newly added)."
@@ -189,12 +184,13 @@ def setup_handlers(app, params: Params, state: StateManager):
 
         state.reload()
 
-        async def send_fn(target_chat_id: int, text: str, reply_markup: Optional[Any] = None):
+        async def send_fn(target_chat_id: int, text: str, reply_markup: Optional[Any] = None, parse_mode: Optional[Any] = None):
             await app.bot.send_message(
                 chat_id=target_chat_id,
                 text=text,
                 disable_web_page_preview=False,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
             )
 
         # Check channels updated more than 5 minutes (300 seconds) ago across all users
@@ -312,6 +308,8 @@ def setup_handlers(app, params: Params, state: StateManager):
         channel_count = len(channels)
         custom_feed_count = len(custom_feeds)
 
+        pending_count = len(user_info.get("pending_notifications", []))
+
         msg = (
             f"<b>YTSub Bot Status</b>\n"
             f"• Authenticated: {'Yes' if has_creds else 'No'}\n"
@@ -319,6 +317,8 @@ def setup_handlers(app, params: Params, state: StateManager):
             f"• Custom feeds: {custom_feed_count}\n"
             f"• Check interval: {params.check_interval_sec} seconds"
         )
+        if pending_count > 0:
+            msg += f"\n• Pending notifications: {pending_count}"
 
         error_feeds = []
         for ch_id, ch_info in channels.items():
@@ -344,6 +344,19 @@ def setup_handlers(app, params: Params, state: StateManager):
 
         await update.effective_message.reply_html(msg)
 
+    async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await check_access(update):
+            return
+
+        user_id = update.effective_user.id
+        cleared = state.clear_pending_notifications(user_id)
+        if cleared > 0:
+            await update.effective_message.reply_html(
+                f"Cleared {cleared} pending notification{'s' if cleared != 1 else ''}."
+            )
+        else:
+            await update.effective_message.reply_html("No pending notifications in queue.")
+
     async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await check_access(update):
             return
@@ -355,6 +368,7 @@ def setup_handlers(app, params: Params, state: StateManager):
             "/start - Connect or re-authenticate your YouTube account",
             "/update - Redownload list of subscribed channels",
             "/custom - Manage custom RSS feeds (list/add/remove)",
+            "/stop - Clear your pending notification queue",
         ]
         if is_admin:
             commands.append("/reload - Reload state from disk and check channels updated >5 min ago")
@@ -528,6 +542,7 @@ def setup_handlers(app, params: Params, state: StateManager):
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("update", cmd_update))
     app.add_handler(CommandHandler("custom", cmd_custom))
+    app.add_handler(CommandHandler("stop", cmd_stop))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("help", cmd_help))

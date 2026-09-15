@@ -15,6 +15,8 @@ class Params:
         self.admin_user_ids: List[int] = []
         self.state_file: str = "ytsub-state.json"
         self.check_interval_sec: int = 300
+        self.subscription_sync_interval_sec: int = 43200
+        self.max_posts_per_min: int = 10
         self.google_client_id: str = ""
         self.google_client_secret: str = ""
         self.google_client_secret_file: str = ""
@@ -30,6 +32,8 @@ class Params:
         parser.add_argument("--admin-user-ids", default="", help="Comma-separated admin Telegram user IDs")
         parser.add_argument("--state-file", default="", help="Path to state JSON file")
         parser.add_argument("--check-interval-sec", "--check-interval", dest="check_interval_sec", type=int, default=0, help="Channel RSS check interval in seconds")
+        parser.add_argument("--subscription-sync-interval-sec", dest="subscription_sync_interval_sec", type=int, default=0, help="YouTube subscription sync interval in seconds (default: 43200 / 12 hours)")
+        parser.add_argument("--max-posts-per-min", type=int, default=None, help="Max video post notifications sent per minute per user (default: 10, set to 0 to disable)")
         parser.add_argument("--google-client-id", default="", help="Google OAuth Client ID")
         parser.add_argument("--google-client-secret", default="", help="Google OAuth Client Secret")
         parser.add_argument("--google-client-secret-file", default="", help="Path to client_secret.json file")
@@ -71,6 +75,26 @@ class Params:
                 self.check_interval_sec = int(check_interval_val)
             except ValueError:
                 raise ValueError(f"invalid check interval: {check_interval_val}")
+
+        sub_sync_val = parsed.subscription_sync_interval_sec or os.getenv("SUBSCRIPTION_SYNC_INTERVAL_SEC", "")
+        if sub_sync_val:
+            try:
+                val = int(sub_sync_val)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"invalid subscription sync interval: {sub_sync_val}") from e
+            if val < 0:
+                raise ValueError(f"--subscription-sync-interval-sec must be >= 0: {val}")
+            self.subscription_sync_interval_sec = val
+
+        max_posts_val = parsed.max_posts_per_min if parsed.max_posts_per_min is not None else os.getenv("MAX_POSTS_PER_MIN", "")
+        if max_posts_val != "" and max_posts_val is not None:
+            try:
+                val = int(max_posts_val)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"invalid max posts per min: {max_posts_val}") from e
+            if val < 0:
+                raise ValueError(f"--max-posts-per-min must be >= 0: {val}")
+            self.max_posts_per_min = val
 
         allowed_raw = parsed.allowed_user_ids or os.getenv("ALLOWED_USERIDS", "")
         if allowed_raw:

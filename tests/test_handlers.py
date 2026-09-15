@@ -573,5 +573,86 @@ async def test_apscheduler_job_duration_filter():
     assert success_record.getMessage() == f'Job "{job_str}" executed successfully, took 1m2s'
 
 
+@pytest.mark.asyncio
+async def test_cmd_stop():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        stop_handler = next(h for h in registered_handlers if hasattr(h, "commands") and "stop" in h.commands)
+
+        # 1. Unauthorized user
+        mock_unauth = MagicMock()
+        mock_unauth.effective_user.id = 9999
+        mock_reply_unauth = AsyncMock()
+        mock_unauth.effective_message.reply_html = mock_reply_unauth
+        await stop_handler.callback(mock_unauth, MagicMock())
+        mock_reply_unauth.assert_not_called()
+
+        # 2. Authorized user with empty queue
+        mock_user = MagicMock()
+        mock_user.effective_user.id = 1001
+        mock_reply_empty = AsyncMock()
+        mock_user.effective_message.reply_html = mock_reply_empty
+        await stop_handler.callback(mock_user, MagicMock())
+        mock_reply_empty.assert_called_with("No pending notifications in queue.")
+
+        # 3. Authorized user with 3 pending notifications
+        for i in range(3):
+            sm.enqueue_notification(1001, f"Video {i}", f"https://youtube.com/watch?v={i}")
+        assert sm.get_pending_notifications_count(1001) == 3
+
+        mock_reply_cleared = AsyncMock()
+        mock_user.effective_message.reply_html = mock_reply_cleared
+        await stop_handler.callback(mock_user, MagicMock())
+        mock_reply_cleared.assert_called_with("Cleared 3 pending notifications.")
+        assert sm.get_pending_notifications_count(1001) == 0
+
+
+@pytest.mark.asyncio
+async def test_cmd_status_shows_pending_notifications():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        status_handler = next(h for h in registered_handlers if hasattr(h, "commands") and "status" in h.commands)
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 1001
+        mock_reply_html = AsyncMock()
+        mock_update.effective_message.reply_html = mock_reply_html
+        context = MagicMock()
+
+        # Without pending notifications
+        await status_handler.callback(mock_update, context)
+        reply1 = mock_reply_html.call_args[0][0]
+        assert "Pending notifications" not in reply1
+
+        # With 4 pending notifications
+        for i in range(4):
+            sm.enqueue_notification(1001, f"Vid {i}", f"https://youtube.com/watch?v={i}")
+
+        await status_handler.callback(mock_update, context)
+        reply2 = mock_reply_html.call_args[0][0]
+        assert "• Pending notifications: 4" in reply2
+
+
+
 
 

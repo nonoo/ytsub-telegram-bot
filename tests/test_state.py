@@ -209,11 +209,17 @@ def test_record_and_reset_feed_error():
         assert alert is True
         assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 10
 
-        # 11th failure should remain capped at 10 and return False
+        # 11th failure should increment count to 11 and return False (alert not re-triggered)
         alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 11")
         assert alert is False
-        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 10
+        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 11
         assert sm.get_user(1001)["channels"]["UC_A"]["last_error"] == "Err 11"
+
+        # Error count should cap at INT64_MAX
+        sm.get_user(1001)["channels"]["UC_A"]["error_count"] = (1 << 63) - 1
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err max")
+        assert alert is False
+        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == (1 << 63) - 1
 
         # Successful reset after reaching 10 should return True (trigger recovery alert)
         recovered = sm.reset_feed_error(1001, is_custom=False, key="UC_A")
@@ -247,5 +253,88 @@ def test_record_and_reset_feed_error():
         assert recovered is True
         assert sm.get_user_custom_feeds(1001)[feed_url]["error_count"] == 0
         assert sm.get_user_custom_feeds(1001)[feed_url]["last_error"] is None
+
+
+def test_pending_notifications_state():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_file = os.path.join(tmpdir, "test-state.json")
+        sm = StateManager(state_file)
+
+        # Initially empty
+        assert sm.get_pending_notifications(1001) == []
+        assert sm.peek_pending_notification(1001) is None
+        assert sm.pop_pending_notification(1001) is None
+        assert sm.get_pending_notifications_count(1001) == 0
+        assert sm.get_users_with_pending_notifications() == []
+
+        # Enqueue items
+        assert sm.enqueue_notification(
+            user_id=1001,
+            title="Channel 1",
+            url="https://youtube.com/watch?v=vid1",
+            video_id="vid1",
+            published="2026-09-13T10:00:00+00:00"
+        ) is True
+
+        # Deduplication check: same URL should return False
+        assert sm.enqueue_notification(
+            user_id=1001,
+            title="Channel 1 (duplicate)",
+            url="https://youtube.com/watch?v=vid1",
+            video_id="vid1",
+            published="2026-09-13T10:00:00+00:00"
+        ) is False
+
+        # Enqueue second item for user 1001
+        assert sm.enqueue_notification(
+            user_id=1001,
+            title="Channel 2",
+            url="https://youtube.com/watch?v=vid2",
+            video_id="vid2",
+            published="2026-09-13T11:00:00+00:00"
+        ) is True
+
+        # Enqueue item for user 2002
+        assert sm.enqueue_notification(
+            user_id=2002,
+            title="Channel 3",
+            url="https://youtube.com/watch?v=vid3",
+            video_id="vid3",
+            published="2026-09-13T12:00:00+00:00"
+        ) is True
+
+        assert sm.get_pending_notifications_count(1001) == 2
+        assert sm.get_pending_notifications_count(2002) == 1
+        assert sm.get_pending_notifications_count() == 3
+        assert set(sm.get_users_with_pending_notifications()) == {1001, 2002}
+
+        # Verify peek does not remove item
+        peeked = sm.peek_pending_notification(1001)
+        assert peeked is not None
+        assert peeked["video_id"] == "vid1"
+        assert sm.get_pending_notifications_count(1001) == 2
+
+        # Verify reload from disk persists queue
+        sm2 = StateManager(state_file)
+        sm2.load()
+        assert sm2.get_pending_notifications_count(1001) == 2
+        assert sm2.get_pending_notifications_count(2002) == 1
+
+        # Pop item
+        popped = sm2.pop_pending_notification(1001)
+        assert popped is not None
+        assert popped["video_id"] == "vid1"
+        assert sm2.get_pending_notifications_count(1001) == 1
+        assert sm2.peek_pending_notification(1001)["video_id"] == "vid2"
+
+        # Clear notifications
+        cleared = sm2.clear_pending_notifications(1001)
+        assert cleared == 1
+        assert sm2.get_pending_notifications_count(1001) == 0
+        assert sm2.get_users_with_pending_notifications() == [2002]
+
+        # Clearing again returns 0
+        assert sm2.clear_pending_notifications(1001) == 0
+
 
 

@@ -57,6 +57,9 @@ def parse_human_timestamp(val: Any) -> float:
     return dt.timestamp() if dt is not None else 0.0
 
 
+INT64_MAX = (1 << 63) - 1
+
+
 class StateManager:
     def __init__(self, file_path: str = "ytsub-state.json"):
         self.file_path = file_path
@@ -91,6 +94,8 @@ class StateManager:
                 if "chat_id" in user:
                     user.pop("chat_id", None)
                     migrated = True
+                if "pending_notifications" not in user:
+                    user["pending_notifications"] = []
 
                 for ch in user.get("channels", {}).values():
                     # last_checked
@@ -155,11 +160,14 @@ class StateManager:
                 "token": "",
                 "refresh_token": "",
                 "channels": {},
-                "custom_feeds": {}
+                "custom_feeds": {},
+                "pending_notifications": []
             }
         user = self.data["users"][uid]
         if "custom_feeds" not in user:
             user["custom_feeds"] = {}
+        if "pending_notifications" not in user:
+            user["pending_notifications"] = []
         return user
 
     def has_user_oauth_credentials(self, user_id: int) -> bool:
@@ -196,6 +204,8 @@ class StateManager:
             if ch_id in existing_channels:
                 ch_data = dict(existing_channels[ch_id])
                 ch_data["title"] = title
+                ch_data.setdefault("error_count", 0)
+                ch_data.setdefault("last_error", None)
                 updated_channels[ch_id] = ch_data
             else:
                 new_count += 1
@@ -359,7 +369,7 @@ class StateManager:
         threshold: int = 10
     ) -> bool:
         """
-        Increments error_count (capped at threshold) and updates last_error.
+        Increments error_count (capped at INT64_MAX) and updates last_error.
         Returns True if error_count just reached threshold (transitioned from threshold-1 to threshold),
         prompting a notification to the user. Returns False otherwise.
         """
@@ -370,7 +380,7 @@ class StateManager:
 
         feed = container[key]
         prev_count = feed.get("error_count", 0)
-        new_count = min(prev_count + 1, threshold)
+        new_count = min(prev_count + 1, INT64_MAX)
         feed["error_count"] = new_count
         feed["last_error"] = str(error_msg)
         self.save()
@@ -406,5 +416,86 @@ class StateManager:
             self.save()
 
         return bool(prev_count >= threshold)
+
+    def enqueue_notification(
+        self,
+        user_id: int,
+        title: str,
+        url: str,
+        video_id: Optional[str] = None,
+        published: Optional[str] = None
+    ) -> bool:
+        """
+        Enqueues a pending notification for a user.
+        Deduplicates by URL so the same video is not enqueued twice.
+        Returns True if enqueued, False if duplicate.
+        """
+        user = self.get_user(user_id)
+        queue = user.setdefault("pending_notifications", [])
+        for item in queue:
+            if item.get("url") == url:
+                return False
+
+        queue.append({
+            "title": title,
+            "url": url,
+            "video_id": video_id,
+            "published": published
+        })
+        self.save()
+        return True
+
+    def get_pending_notifications(self, user_id: int) -> List[Dict[str, Any]]:
+        """Returns a copy of the user's pending notifications."""
+        user = self.get_user(user_id)
+        return list(user.get("pending_notifications", []))
+
+    def peek_pending_notification(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Returns the oldest pending notification without removing it."""
+        user = self.get_user(user_id)
+        queue = user.get("pending_notifications", [])
+        return queue[0] if queue else None
+
+    def pop_pending_notification(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Pops the oldest pending notification and persists state."""
+        user = self.get_user(user_id)
+        queue = user.setdefault("pending_notifications", [])
+        if not queue:
+            return None
+        item = queue.pop(0)
+        self.save()
+        return item
+
+    def clear_pending_notifications(self, user_id: int) -> int:
+        """Clears all pending notifications for a user and returns count of cleared items."""
+        user = self.get_user(user_id)
+        queue = user.setdefault("pending_notifications", [])
+        count = len(queue)
+        if count > 0:
+            user["pending_notifications"] = []
+            self.save()
+        return count
+
+    def get_users_with_pending_notifications(self) -> List[int]:
+        """Returns a list of user IDs (as ints) that have non-empty pending_notifications."""
+        users_with_pending = []
+        for uid_str, user_info in self.data.get("users", {}).items():
+            if user_info.get("pending_notifications"):
+                try:
+                    users_with_pending.append(int(uid_str))
+                except ValueError:
+                    pass
+        return users_with_pending
+
+    def get_pending_notifications_count(self, user_id: Optional[int] = None) -> int:
+        """Returns pending notifications count for a specific user, or total across all users."""
+        if user_id is not None:
+            user = self.get_user(user_id)
+            return len(user.get("pending_notifications", []))
+        total = 0
+        for user_info in self.data.get("users", {}).values():
+            total += len(user_info.get("pending_notifications", []))
+        return total
+
 
 

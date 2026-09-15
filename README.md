@@ -47,6 +47,8 @@ You can configure the bot via command-line arguments or environment variables.
 - `ALLOWED_USERIDS`: Comma-separated list of allowed Telegram user IDs (if not specified, all users can interact)
 - `STATE_FILE`: Path to persistent state file (default: `ytsub-state.json`)
 - `CHECK_INTERVAL_SEC`: RSS polling interval in seconds (default: `300` / 5 minutes)
+- `SUBSCRIPTION_SYNC_INTERVAL_SEC`: YouTube subscription sync interval in seconds (default: `43200` / 12 hours)
+- `MAX_POSTS_PER_MIN`: Max video post notifications sent per minute per user (default: `10`, set to `0` to disable rate limiting)
 - `GOOGLE_CLIENT_ID`: Google OAuth Client ID (optional, or put `client_secret.json` in bot directory)
 - `GOOGLE_CLIENT_SECRET`: Google OAuth Client Secret (optional)
 - `GOOGLE_CLIENT_SECRET_FILE`: Path to `client_secret.json` (auto-detected if `client_secret.json` is in the bot root)
@@ -100,33 +102,37 @@ Each authorized user can independently connect their YouTube account and receive
 ### Available commands
 
 - `/start`: Connect or re-authenticate your YouTube account via OAuth 2.0. If credentials already exist, prompts for confirmation before redoing the flow.
-- `/update`: Refresh and synchronize your subscribed YouTube channels from YouTube Data API v3.
+- `/update`: Refresh and synchronize your subscribed YouTube channels from YouTube Data API v3 (also performed automatically on bot startup and every 12 hours).
 - `/custom`: Manage additional custom RSS feeds:
   - `/custom` or `/custom list`: List your configured custom feeds.
   - `/custom add <url_or_channel_id>`: Add a custom RSS feed (supports raw feed URLs, YouTube channel IDs like `UC...`, channel URLs, and playlist URLs). The channel/author name is automatically extracted from the feed.
   - `/custom remove <number_or_url>`: Remove a custom feed by its list number or exact URL.
+- `/stop`: Clear your pending notification queue.
 - `/reload`: Reload the state from `ytsub-state.json` and perform RSS feed updates on channels updated more than 5 minutes ago (admin only).
-- `/status`: Show current tracking status (channels tracked, custom feeds, check interval, authentication state, and any feeds with errors).
+- `/status`: Show current tracking status (channels tracked, custom feeds, pending notifications queue, check interval, authentication state, and any feeds with errors).
 - `/help`: Display the list of available commands.
 
 ## How it works
 
-1. **New channel subscriptions & custom feeds**: When channels or custom feeds are first added, existing videos are not spammed. The current timestamp is recorded in `ytsub-state.json`.
+1. **Subscription synchronization & quiet initial sync**: The bot automatically synchronizes subscribed channels from the YouTube Data API v3 on application startup and every 12 hours in the background. You can also trigger an on-demand sync at any time using `/update`. When channels or custom feeds are first added, existing videos are not spammed; the current timestamp is recorded in `ytsub-state.json`.
 2. **Periodic feed checks**: Every 5 minutes (configurable with `CHECK_INTERVAL_SEC`), the bot checks Atom/RSS feeds for all tracked YouTube channels and custom feeds. Unique feed URLs are polled concurrently and deduplicated.
-3. **Targeted notifications**: When a new video upload is found, the bot sends a notification formatted as:
+3. **Persistent outbox & rate-limited delivery**: Detected video notifications are saved to a persistent queue in `ytsub-state.json` and delivered gradually according to `MAX_POSTS_PER_MIN` (default: 10/min per user). If notifications arrive within the rate limit (e.g. 8 videos), they are delivered immediately in a burst. If the bot is stopped for hours or a large backlog accumulates, posts are not lost and will be delivered gradually across rolling 60-second windows without spamming or triggering Telegram rate limits. Users can clear their pending backlog at any time using `/stop`.
+4. **Targeted notifications & relative timestamps**: Each video notification displays the channel title in bold (without brackets) and includes a relative timestamp calculated at the time of delivery:
    ```
-   [{channel_title}] https://www.youtube.com/watch?v={video_id}
+   {channel_title} https://www.youtube.com/watch?v={video_id} ({time_ago})
    ```
-   only to users subscribed to that channel or custom feed.
-4. **Watch Later & Listen Later buttons**: Each video notification contains two inline action buttons:
+   *(e.g. `Google Developers https://www.youtube.com/watch?v=abcd1234efg (5m ago)` with bold channel name)*
+   Sent only to users subscribed to that channel or custom feed.
+5. **Watch Later & Listen Later buttons**: Each video notification contains two inline action buttons:
    - `🕒 Watch Later`: Adds the video to your private **`YTSub Watch Later`** playlist on YouTube.
    - `🎧 Listen Later`: Adds the video to your private **`YTSub Listen Later`** playlist on YouTube.
 
    *(Note: The YouTube Data API does not allow third-party applications to modify YouTube's default system "Watch Later" playlist, which is why a dedicated custom playlist named `YTSub Watch Later` is used instead.)*
 
    Both playlists are created automatically in your YouTube library if they don't already exist. Clicking a button adds the video, switches the button to a checkmark (`✅ Watch Later` / `✅ Listen Later`), and displays a toast notification. Clicking a checkmarked button removes the video from the playlist and reverts the button back to its initial state.
-5. **State persistence**: User access tokens, cached playlist IDs, and channel update timestamps are persisted atomically to `ytsub-state.json`.
-6. **Feed error detection & recovery alerts**: If a feed cannot be fetched or parsed, the latest error and consecutive error count are recorded in `ytsub-state.json`. When a feed encounters 10 consecutive failures, the user receives an alert with the feed name and error message. The counter remains at 10 to prevent alert spam; once the feed recovers and is processed without errors, the counter resets to 0 and the user is notified that the feed is working again.
+
+6. **State persistence**: User access tokens, cached playlist IDs, channel update timestamps, and pending notification queues are persisted atomically to `ytsub-state.json`.
+7. **Feed error detection & recovery alerts**: If a feed cannot be fetched or parsed, the latest error and consecutive error count are recorded in `ytsub-state.json` (increasing up to int64 max). When a periodic update cycle completes, feeds that reached 10 consecutive failures are aggregated into a single user alert (e.g. `Error updating: Feed A, Feed B, ... and more` if more than 10 feeds). Likewise, recovering feeds are aggregated into a single recovery notification (`Working again: Feed A, Feed B, ... and more`).
 
 ## Contributors
 

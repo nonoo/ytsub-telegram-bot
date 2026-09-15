@@ -1,14 +1,17 @@
 import asyncio
+import html
 import logging
 import re
 import time
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
 
 import aiohttp
 from dateutil import parser as date_parser
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 
 from state import StateManager, parse_human_datetime, parse_human_timestamp, utc_now
 
@@ -43,6 +46,33 @@ def normalize_feed_url(input_str: str) -> str:
     if m_pl:
         return f"https://www.youtube.com/feeds/videos.xml?playlist_id={m_pl.group(1)}"
     return s
+
+
+def format_time_ago(published_dt: datetime, now_dt: Optional[datetime] = None) -> str:
+    """
+    Formats the elapsed time since published_dt in human format:
+    - Under 1 minute: '(Xs ago)' (e.g. '5s ago')
+    - Under 60 minutes: '(Xm ago)' (e.g. '5m ago')
+    - 60 minutes to 23 hours: '(Xh ago)' (e.g. '5h ago')
+    - 24 hours or more: '(Xd ago)' (e.g. '5d ago')
+    """
+    if now_dt is None:
+        now_dt = datetime.now(timezone.utc)
+    if published_dt.tzinfo is None:
+        published_dt = published_dt.replace(tzinfo=timezone.utc)
+    elapsed = max(0, int((now_dt - published_dt).total_seconds()))
+
+    if elapsed < 60:
+        return f"{elapsed}s ago"
+    elif elapsed < 3600:
+        mins = elapsed // 60
+        return f"{mins}m ago"
+    elif elapsed < 86400:
+        hours = elapsed // 3600
+        return f"{hours}h ago"
+    else:
+        days = elapsed // 86400
+        return f"{days}d ago"
 
 
 class VideoEntry:
@@ -206,9 +236,12 @@ async def fetch_channel_rss(session: aiohttp.ClientSession, channel_id: str) -> 
 
 async def check_channels_and_notify(
     state: StateManager,
-    send_message_fn: Callable[[int, str], Coroutine[Any, Any, None]],
+    send_message_fn: Callable[..., Coroutine[Any, Any, None]],
     filter_user_id: Optional[int] = None,
-    min_seconds_since_check: float = 0.0
+    min_seconds_since_check: float = 0.0,
+    auto_dispatch: bool = False,
+    max_posts_per_min: int = 10,
+    user_send_times: Optional[Dict[int, List[float]]] = None
 ) -> int:
     """
     Checks subscribed channels and custom feeds and notifies users about new videos.
@@ -255,6 +288,8 @@ async def check_channels_and_notify(
         return 0
 
     checked_count = 0
+    user_errors_to_alert: Dict[int, List[str]] = defaultdict(list)
+    user_recoveries_to_alert: Dict[int, List[str]] = defaultdict(list)
     async with aiohttp.ClientSession() as session:
         # Fetch RSS feeds concurrently in chunks
         chunk_size = 10
@@ -300,14 +335,8 @@ async def check_channels_and_notify(
                             threshold=ERROR_ALERT_THRESHOLD
                         )
                         if should_alert:
-                            alert_text = (
-                                f"⚠️ Error updating feed \"{display_title}\" (10 consecutive failures):\n"
-                                f"{error_msg}"
-                            )
-                            try:
-                                await send_message_fn(user_id, alert_text)
-                            except Exception as e:
-                                logger.error("Failed to send error notification to %s: %s", user_id, e)
+                            if display_title not in user_errors_to_alert[user_id]:
+                                user_errors_to_alert[user_id].append(display_title)
 
                         if is_custom:
                             state.update_custom_feed_timestamps(
@@ -336,48 +365,30 @@ async def check_channels_and_notify(
                         threshold=ERROR_ALERT_THRESHOLD
                     )
                     if was_failing:
-                        recovery_text = f"✅ Feed \"{display_title}\" is working again."
-                        try:
-                            await send_message_fn(user_id, recovery_text)
-                        except Exception as e:
-                            logger.error("Failed to send recovery notification to %s: %s", user_id, e)
+                        if display_title not in user_recoveries_to_alert[user_id]:
+                            user_recoveries_to_alert[user_id].append(display_title)
 
                     last_pub_dt = parse_human_datetime(last_pub_val)
                     newest_pub_dt = None
 
                     for entry in entries:
                         if last_pub_dt is None or entry.published_dt > last_pub_dt:
-                            # New video! Log update and notify user
+                            # New video! Log update and enqueue for gradual delivery
                             logger.info(
-                                "RSS update found for '%s' (%s): '%s' (%s) -> notifying user %s",
+                                "RSS update found for '%s' (%s): '%s' (%s) -> enqueuing notification for user %s",
                                 display_title,
                                 key,
                                 entry.title,
                                 entry.url,
                                 user_id
                             )
-                            message = f"[{display_title}] {entry.url}"
-
-                            reply_markup = None
-                            if entry.video_id:
-                                keyboard = [
-                                    [
-                                        InlineKeyboardButton("🕒 Watch Later", callback_data=f"wl:{entry.video_id}"),
-                                        InlineKeyboardButton("🎧 Listen Later", callback_data=f"ll:{entry.video_id}")
-                                    ]
-                                ]
-                                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                            try:
-                                if reply_markup:
-                                    try:
-                                        await send_message_fn(user_id, message, reply_markup=reply_markup)
-                                    except TypeError:
-                                        await send_message_fn(user_id, message)
-                                else:
-                                    await send_message_fn(user_id, message)
-                            except Exception as e:
-                                logger.error("Failed to send message to %s: %s", user_id, e)
+                            state.enqueue_notification(
+                                user_id=user_id,
+                                title=display_title,
+                                url=entry.url,
+                                video_id=entry.video_id,
+                                published=entry.published_iso or entry.published_dt.isoformat()
+                            )
 
                             newest_pub_dt = entry.published_dt
                             last_pub_dt = entry.published_dt
@@ -397,4 +408,143 @@ async def check_channels_and_notify(
                             last_checked_epoch=check_timestamp_epoch
                         )
 
+    if send_message_fn is not None:
+        for user_id, err_feeds in user_errors_to_alert.items():
+            if not err_feeds:
+                continue
+            feed_str = ", ".join(err_feeds[:10])
+            if len(err_feeds) > 10:
+                feed_str += ", ... and more"
+            msg = f"Error updating: {feed_str}"
+            try:
+                await send_message_fn(user_id, msg)
+            except Exception as e:
+                logger.error("Failed to send error notification to %s: %s", user_id, e)
+
+        for user_id, rec_feeds in user_recoveries_to_alert.items():
+            if not rec_feeds:
+                continue
+            feed_str = ", ".join(rec_feeds[:10])
+            if len(rec_feeds) > 10:
+                feed_str += ", ... and more"
+            msg = f"Working again: {feed_str}"
+            try:
+                await send_message_fn(user_id, msg)
+            except Exception as e:
+                logger.error("Failed to send recovery notification to %s: %s", user_id, e)
+
+    if auto_dispatch and send_message_fn is not None:
+        await dispatch_pending_notifications(
+            state=state,
+            send_message_fn=send_message_fn,
+            max_posts_per_min=max_posts_per_min,
+            user_send_times=user_send_times
+        )
+
     return checked_count
+
+
+async def dispatch_pending_notifications(
+    state: StateManager,
+    send_message_fn: Callable[..., Coroutine[Any, Any, None]],
+    max_posts_per_min: int = 10,
+    user_send_times: Optional[Dict[int, List[float]]] = None
+) -> int:
+    """
+    Gradually dispatches pending notifications to users according to max_posts_per_min (Option A).
+    Allows bursts up to max_posts_per_min within any rolling 60-second window per user.
+    Calculates dynamic relative timestamp (e.g. '(5m ago)') at send time.
+    Returns total number of messages sent in this call.
+    """
+    if user_send_times is None:
+        user_send_times = {}
+
+    sent_count = 0
+    now = time.monotonic()
+    now_utc = utc_now()
+
+    for user_id in state.get_users_with_pending_notifications():
+        if user_id not in user_send_times:
+            user_send_times[user_id] = []
+
+        # Purge send timestamps older than 60 seconds
+        user_send_times[user_id] = [t for t in user_send_times[user_id] if (now - t) < 60.0]
+
+        quota = (max_posts_per_min - len(user_send_times[user_id])) if max_posts_per_min > 0 else 999999
+
+        while quota > 0:
+            notification = state.peek_pending_notification(user_id)
+            if not notification:
+                break
+
+            title = notification.get("title", "")
+            url = notification.get("url", "")
+            video_id = notification.get("video_id")
+            pub_raw = notification.get("published")
+
+            pub_dt = parse_human_datetime(pub_raw) if pub_raw else None
+            if not pub_dt and pub_raw:
+                try:
+                    pub_dt = date_parser.parse(pub_raw)
+                    if pub_dt.tzinfo is None:
+                        pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pub_dt = None
+
+            if not pub_dt:
+                pub_dt = now_utc
+
+            time_ago = format_time_ago(pub_dt, now_dt=now_utc)
+            if title:
+                escaped_title = html.escape(title)
+                message = f"<b>{escaped_title}</b> {url} ({time_ago})"
+            else:
+                message = f"{url} ({time_ago})"
+
+            reply_markup = None
+            if video_id:
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🕒 Watch Later", callback_data=f"wl:{video_id}"),
+                        InlineKeyboardButton("🎧 Listen Later", callback_data=f"ll:{video_id}")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+            try:
+                if reply_markup:
+                    try:
+                        await send_message_fn(user_id, message, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                    except TypeError:
+                        try:
+                            await send_message_fn(user_id, message, reply_markup=reply_markup)
+                        except TypeError:
+                            await send_message_fn(user_id, message)
+                else:
+                    try:
+                        await send_message_fn(user_id, message, parse_mode=ParseMode.HTML)
+                    except TypeError:
+                        await send_message_fn(user_id, message)
+
+                state.pop_pending_notification(user_id)
+                send_time = time.monotonic()
+                user_send_times[user_id].append(send_time)
+                now = send_time
+                sent_count += 1
+                quota -= 1
+
+                # Brief sleep between burst messages to respect per-second flood limits
+                if quota > 0 and state.peek_pending_notification(user_id):
+                    await asyncio.sleep(0.2)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "forbidden" in err_str or "blocked" in err_str or "chat not found" in err_str or "user is deactivated" in err_str:
+                    logger.warning("User %s is unreachable (%s). Dropping pending notification.", user_id, e)
+                    state.pop_pending_notification(user_id)
+                    quota -= 1
+                else:
+                    logger.error("Failed to send pending notification to %s: %s", user_id, e)
+                    # Temporary failure: pause sending to this user for this tick
+                    break
+
+    return sent_count

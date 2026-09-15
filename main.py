@@ -1,14 +1,17 @@
+import asyncio
 import logging
 import sys
 import time
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
+from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, ContextTypes
 
 from handlers import setup_handlers
 from params import Params
-from rss import check_channels_and_notify
+from rss import check_channels_and_notify, dispatch_pending_notifications
 from state import StateManager
+from youtube import sync_all_subscriptions
 
 class TelegramGetUpdatesFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
@@ -70,12 +73,13 @@ logger = logging.getLogger("ytsub")
 async def scheduled_rss_check(context: ContextTypes.DEFAULT_TYPE):
     state: StateManager = context.job.data["state"]
 
-    async def send_fn(chat_id: int, text: str, reply_markup: Optional[Any] = None):
+    async def send_fn(chat_id: int, text: str, reply_markup: Optional[Any] = None, parse_mode: Optional[Any] = None):
         await context.bot.send_message(
             chat_id=chat_id,
             text=text,
             disable_web_page_preview=False,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
         )
 
     try:
@@ -84,12 +88,57 @@ async def scheduled_rss_check(context: ContextTypes.DEFAULT_TYPE):
         logger.error("Error in scheduled RSS check: %s", e)
 
 
+async def scheduled_subscription_sync(context: ContextTypes.DEFAULT_TYPE):
+    state: StateManager = context.job.data["state"]
+    params: Params = context.job.data["params"]
+
+    async def send_fn(chat_id: int, text: str):
+        await context.bot.send_message(chat_id=chat_id, text=text)
+
+    try:
+        await sync_all_subscriptions(state=state, params=params, send_message_fn=send_fn)
+    except Exception as e:
+        logger.error("Error in scheduled subscription sync: %s", e)
+
+
 async def notify_admins(app, params: Params):
     for admin_id in params.admin_user_ids:
         try:
             await app.bot.send_message(chat_id=admin_id, text="YTSub bot started.")
         except Exception as e:
             logger.warning("Failed to send startup message to admin %s: %s", admin_id, e)
+
+
+async def notification_dispatcher_loop(app, state: StateManager, params: Params):
+    logger.info("Notification dispatcher started (max %d posts/min per user).", params.max_posts_per_min)
+    user_send_times: Dict[int, List[float]] = {}
+
+    async def send_fn(chat_id: int, text: str, reply_markup=None, parse_mode=None):
+        await app.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            disable_web_page_preview=False,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+
+    while True:
+        try:
+            users_with_pending = state.get_users_with_pending_notifications()
+            if users_with_pending:
+                await dispatch_pending_notifications(
+                    state=state,
+                    send_message_fn=send_fn,
+                    max_posts_per_min=params.max_posts_per_min,
+                    user_send_times=user_send_times
+                )
+            await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            logger.info("Notification dispatcher stopped.")
+            break
+        except Exception as e:
+            logger.error("Error in notification dispatcher loop: %s", e)
+            await asyncio.sleep(2.0)
 
 
 def main():
@@ -118,9 +167,21 @@ def main():
     )
     logger.info("Scheduled RSS polling job every %d seconds.", interval)
 
-    # Send startup message to admins
+    # Schedule periodic subscription sync (every 12 hours and at startup)
+    sub_sync_interval = params.subscription_sync_interval_sec if params.subscription_sync_interval_sec > 0 else 43200
+    app.job_queue.run_repeating(
+        scheduled_subscription_sync,
+        interval=sub_sync_interval,
+        first=1,
+        data={"state": state, "params": params},
+        name="subscription_sync"
+    )
+    logger.info("Scheduled subscription sync job every %d seconds.", sub_sync_interval)
+
+    # Send startup message to admins and start background notification dispatcher
     async def post_init(application):
         await notify_admins(application, params)
+        application.create_task(notification_dispatcher_loop(application, state, params))
 
     app.post_init = post_init
 
