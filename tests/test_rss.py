@@ -227,7 +227,7 @@ async def test_check_custom_feeds_and_notify():
 
 
 @pytest.mark.asyncio
-async def test_feed_error_alert_on_tenth_failure_and_recovery():
+async def test_feed_error_alert_on_twenty_fifth_failure_and_recovery():
     with tempfile.TemporaryDirectory() as tmpdir:
         sm = StateManager(f"{tmpdir}/state.json")
         sm.set_user_tokens(101, "t1", "r1")
@@ -241,8 +241,8 @@ async def test_feed_error_alert_on_tenth_failure_and_recovery():
         with patch("rss.fetch_channel_rss", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.side_effect = FeedFetchError("HTTP 500")
 
-            # Run 9 failures: error_count goes 1..9, no alert messages sent
-            for i in range(1, 10):
+            # Run 24 failures: error_count goes 1..24, no alert messages sent
+            for i in range(1, 25):
                 checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
                 assert checked == 0
                 assert len(sent_messages) == 0
@@ -250,7 +250,7 @@ async def test_feed_error_alert_on_tenth_failure_and_recovery():
                 assert ch["error_count"] == i
                 assert ch["last_error"] == "HTTP 500"
 
-            # 10th failure: alert message must be sent to user
+            # 25th failure: alert message must be sent to user
             checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
             assert checked == 0
             assert len(sent_messages) == 1
@@ -259,15 +259,15 @@ async def test_feed_error_alert_on_tenth_failure_and_recovery():
             assert text == "Error updating: Broken Channel"
 
             ch = sm.get_user(101)["channels"]["UC_ERR"]
-            assert ch["error_count"] == 10
+            assert ch["error_count"] == 25
 
-            # 11th failure: error_count increments to 11, no new alert sent
+            # 26th failure: error_count increments to 26, no new alert sent
             checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
             assert checked == 0
             assert len(sent_messages) == 1
-            assert sm.get_user(101)["channels"]["UC_ERR"]["error_count"] == 11
+            assert sm.get_user(101)["channels"]["UC_ERR"]["error_count"] == 26
 
-            # 12th run: feed recovers!
+            # 27th run: feed recovers!
             mock_fetch.side_effect = None
             mock_fetch.return_value = SAMPLE_FEED
 
@@ -291,7 +291,7 @@ async def test_feed_error_alert_batching_and_overflow():
         sm = StateManager(f"{tmpdir}/state.json")
         sm.get_user(101)["token"] = "valid_token"
 
-        # Create 12 channels for user 101, each already with 9 errors
+        # Create 12 channels for user 101, each already with 24 errors
         channels = {}
         for i in range(1, 13):
             ch_id = f"UC_{i:02d}"
@@ -299,7 +299,7 @@ async def test_feed_error_alert_batching_and_overflow():
         sm.sync_user_channels(101, channels)
 
         for ch_id in channels:
-            sm.get_user(101)["channels"][ch_id]["error_count"] = 9
+            sm.get_user(101)["channels"][ch_id]["error_count"] = 24
 
         sent_messages = []
 
@@ -309,7 +309,7 @@ async def test_feed_error_alert_batching_and_overflow():
         with patch("rss.fetch_channel_rss", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.side_effect = FeedFetchError("HTTP 500")
 
-            # 10th failure for all 12 channels -> exactly ONE batched message sent with first 10 and '... and more'
+            # 25th failure for all 12 channels -> exactly ONE batched message sent with first 10 and '... and more'
             await check_channels_and_notify(state=sm, send_message_fn=mock_send)
             assert len(sent_messages) == 1
             chat_id, text = sent_messages[0]

@@ -97,7 +97,7 @@ ytsub-telegram-bot/
   - `check_channels_and_notify()`: Deduplicates and polls feed URLs across users, enqueuing new videos into `state.enqueue_notification()` (decoupled from immediate sending; optional `auto_dispatch` for direct sync).
   - `dispatch_pending_notifications()`: Continuous dispatcher implementing Option A rate limiting (bursts up to `max_posts_per_min` within rolling 60-second windows with 0.2s pause between posts), calculating relative elapsed time at moment of delivery, formatting channel title in bold HTML without brackets (`<b>{title}</b>`), and dropping blocked users.
 - Supports `min_seconds_since_check` thresholding (used by `/reload` to filter feeds checked > 300s ago).
-- Error tracking and alert dispatching: detects HTTP and XML parsing failures, records `error_count` and `last_error` in state (capping `error_count` at int64 max). When the periodic check completes, groups newly failing feeds (at 10 consecutive failures) into a single notification (`Error updating: Feed A, Feed B, ... and more` for >10 feeds) and grouped recovery notifications (`Working again: Feed A, Feed B, ... and more`).
+- Error tracking and alert dispatching: detects HTTP and XML parsing failures, records `error_count` and `last_error` in state (capping `error_count` at int64 max). When the periodic check completes, groups newly failing feeds (at 25 consecutive failures) into a single notification (`Error updating: Feed A, Feed B, ... and more` for >10 feeds) and grouped recovery notifications (`Working again: Feed A, Feed B, ... and more`).
 
 ### `handlers.py`
 - Implements Telegram interactions using `python-telegram-bot` v21+:

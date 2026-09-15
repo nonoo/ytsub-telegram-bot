@@ -17,7 +17,7 @@ from state import StateManager, parse_human_datetime, parse_human_timestamp, utc
 
 logger = logging.getLogger(__name__)
 
-ERROR_ALERT_THRESHOLD = 10
+ERROR_ALERT_THRESHOLD = 25
 
 
 class FeedFetchError(Exception):
