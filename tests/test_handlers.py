@@ -33,7 +33,7 @@ async def test_unauthenticated_user_update():
 
         # Call /update without OAuth credentials
         await update_handler.callback(mock_update, context)
-        mock_reply.assert_called_with("You haven't connected your YouTube account yet. Please use the /start command.")
+        mock_reply.assert_called_with("⚠️ You haven't connected your YouTube account yet. Please use the /start command.")
 
 
 @pytest.mark.asyncio
@@ -61,7 +61,7 @@ async def test_reload_admin_restriction():
 
         context = MagicMock()
         await reload_handler.callback(mock_update_user, context)
-        mock_reply_user.assert_called_with("This command is only available to administrators.")
+        mock_reply_user.assert_called_with("⛔ This command is only available to administrators.")
 
         # 2. Admin user (2002) calls /reload
         mock_update_admin = MagicMock()
@@ -260,7 +260,7 @@ async def test_callback_playlist_action_watch_later():
                 video_id="test_vid_1"
             )
             assert sm.get_user_playlist(1001, "watch_later") == "PL_wl_id"
-            mock_query.answer.assert_called_with("Added to YTSub Watch Later")
+            mock_query.answer.assert_called_with("✅ Added to YTSub Watch Later")
 
             # Verify button text and callback_data updated
             mock_query.edit_message_reply_markup.assert_called_once()
@@ -322,7 +322,7 @@ async def test_callback_playlist_action_toggle_removal():
                 playlist_id="PL_wl_id",
                 video_id="test_vid_1"
             )
-            mock_query.answer.assert_called_with("Removed from YTSub Watch Later")
+            mock_query.answer.assert_called_with("🗑️ Removed from YTSub Watch Later")
 
             # Verify button toggled back to initial state
             mock_query.edit_message_reply_markup.assert_called_once()
@@ -364,7 +364,7 @@ async def test_callback_playlist_action_unauthenticated():
 
         await playlist_handler.callback(mock_update, context)
         mock_query.answer.assert_called_with(
-            "Please connect your YouTube account with /start first.",
+            "⚠️ Please connect your YouTube account with /start first.",
             show_alert=True
         )
 
@@ -409,7 +409,7 @@ async def test_cmd_custom_list_and_manage():
         with patch("handlers.fetch_feed_url", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = sample_feed
             await custom_handler.callback(mock_update, context)
-            assert "Added custom feed: <b>Google Developers</b>" in mock_reply_html.call_args[0][0]
+            assert "✅ Added custom feed: <b>Google Developers</b>" in mock_reply_html.call_args[0][0]
 
         # Check state
         feeds = sm.get_user_custom_feeds(1001)
@@ -428,7 +428,7 @@ async def test_cmd_custom_list_and_manage():
         # 4. /custom remove 1
         context.args = ["remove", "1"]
         await custom_handler.callback(mock_update, context)
-        assert "Removed custom feed: <b>Google Developers</b>" in mock_reply_html.call_args[0][0]
+        assert "✅ Removed custom feed: <b>Google Developers</b>" in mock_reply_html.call_args[0][0]
         assert len(sm.get_user_custom_feeds(1001)) == 0
 
         # 5. /custom add with failing URL
@@ -603,7 +603,7 @@ async def test_cmd_stop():
         mock_reply_empty = AsyncMock()
         mock_user.effective_message.reply_html = mock_reply_empty
         await stop_handler.callback(mock_user, MagicMock())
-        mock_reply_empty.assert_called_with("No pending notifications in queue.")
+        mock_reply_empty.assert_called_with("ℹ️ No pending notifications in queue.")
 
         # 3. Authorized user with 3 pending notifications
         for i in range(3):
@@ -613,7 +613,7 @@ async def test_cmd_stop():
         mock_reply_cleared = AsyncMock()
         mock_user.effective_message.reply_html = mock_reply_cleared
         await stop_handler.callback(mock_user, MagicMock())
-        mock_reply_cleared.assert_called_with("Cleared 3 pending notifications.")
+        mock_reply_cleared.assert_called_with("🗑️ Cleared 3 pending notifications.")
         assert sm.get_pending_notifications_count(1001) == 0
 
 

@@ -104,7 +104,7 @@ async def scheduled_subscription_sync(context: ContextTypes.DEFAULT_TYPE):
 async def notify_admins(app, params: Params):
     for admin_id in params.admin_user_ids:
         try:
-            await app.bot.send_message(chat_id=admin_id, text="YTSub bot started.")
+            await app.bot.send_message(chat_id=admin_id, text="🚀 YTSub bot started.")
         except Exception as e:
             logger.warning("Failed to send startup message to admin %s: %s", admin_id, e)
 

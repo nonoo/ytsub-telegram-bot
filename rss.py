@@ -415,7 +415,7 @@ async def check_channels_and_notify(
             feed_str = ", ".join(err_feeds[:10])
             if len(err_feeds) > 10:
                 feed_str += f", ... and {len(err_feeds) - 10} more"
-            msg = f"Error updating: {feed_str}"
+            msg = f"⚠️ Error updating: {feed_str}"
             try:
                 await send_message_fn(user_id, msg)
             except Exception as e:
@@ -427,7 +427,7 @@ async def check_channels_and_notify(
             feed_str = ", ".join(rec_feeds[:10])
             if len(rec_feeds) > 10:
                 feed_str += f", ... and {len(rec_feeds) - 10} more"
-            msg = f"Working again: {feed_str}"
+            msg = f"✅ Working again: {feed_str}"
             try:
                 await send_message_fn(user_id, msg)
             except Exception as e:

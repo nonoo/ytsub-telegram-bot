@@ -232,7 +232,7 @@ async def test_cmd_update_delegates_to_sync_user_subscriptions():
 
             mock_sync.assert_called_once_with(sm, params, 1001, send_message_fn=ANY)
             assert mock_reply.call_count == 2
-            mock_reply.assert_any_call("Redownloading subscribed channels...")
+            mock_reply.assert_any_call("🔄 Redownloading subscribed channels...")
             assert "Successfully synced subscriptions." in mock_reply.call_args_list[1][0][0]
             assert "Total channels tracked: 5 (2 newly added)." in mock_reply.call_args_list[1][0][0]
 
@@ -240,27 +240,27 @@ async def test_cmd_update_delegates_to_sync_user_subscriptions():
 def test_format_channel_delta_log():
     # Both added and removed <= 10
     msg = format_channel_delta_log(["Ch 1", "Ch 2"], ["Ch 3", "Ch 4"])
-    assert msg == "Added channels: Ch 1, Ch 2\nRemoved channels: Ch 3, Ch 4"
+    assert msg == "➕ Added channels: Ch 1, Ch 2\n➖ Removed channels: Ch 3, Ch 4"
 
     # More than 10 channels added
     added_12 = [f"Add {i}" for i in range(1, 13)]
     msg = format_channel_delta_log(added_12, ["Rem 1"])
     expected_added = ", ".join(f"Add {i}" for i in range(1, 11)) + ", and 2 more"
-    assert msg == f"Added channels: {expected_added}\nRemoved channels: Rem 1"
+    assert msg == f"➕ Added channels: {expected_added}\n➖ Removed channels: Rem 1"
 
     # More than 10 channels removed
     rem_12 = [f"Rem {i}" for i in range(1, 13)]
     msg = format_channel_delta_log(["Add 1"], rem_12)
     expected_rem = ", ".join(f"Rem {i}" for i in range(1, 11)) + ", and 2 more"
-    assert msg == f"Added channels: Add 1\nRemoved channels: {expected_rem}"
+    assert msg == f"➕ Added channels: Add 1\n➖ Removed channels: {expected_rem}"
 
     # Only added
     msg = format_channel_delta_log(["Add 1"], [])
-    assert msg == "Added channels: Add 1"
+    assert msg == "➕ Added channels: Add 1"
 
     # Only removed
     msg = format_channel_delta_log([], ["Rem 1"])
-    assert msg == "Removed channels: Rem 1"
+    assert msg == "➖ Removed channels: Rem 1"
 
     # None added or removed
     assert format_channel_delta_log([], []) is None
@@ -293,7 +293,7 @@ async def test_sync_user_subscriptions_delta_logging():
             await sync_user_subscriptions(sm, params, 1001, send_message_fn=mock_send)
 
             # Check that logger.info was called with Added and Removed channels
-            expected_log = "Added channels: Channel 3\nRemoved channels: Channel 2"
+            expected_log = "➕ Added channels: Channel 3\n➖ Removed channels: Channel 2"
             mock_logger_info.assert_any_call("%s", expected_log)
             mock_send.assert_called_once_with(1001, expected_log)
 

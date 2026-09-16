@@ -49,8 +49,7 @@ def setup_handlers(app, params: Params, state: StateManager):
 
         if not client_id or not client_secret:
             msg = (
-                "Welcome to <b>YTSub</b>!\n\n"
-                "Google OAuth credentials are not configured on the bot server.\n\n"
+                "⚠️ <b>Google OAuth credentials are not configured on the bot server.</b>\n\n"
                 "Please configure <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in the bot's configuration."
             )
             await update.effective_message.reply_html(msg)
@@ -62,7 +61,7 @@ def setup_handlers(app, params: Params, state: StateManager):
             user_sessions[user_id] = "awaiting_auth_code"
 
             msg = (
-                "Welcome to <b>YTSub</b>!\n\n"
+                "👋 Welcome to <b>YTSub</b>!\n\n"
                 "To connect your YouTube account and read your subscriptions:\n\n"
                 f"1. 👉 <a href=\"{auth_url}\"><b>Click here to Authorize with Google</b></a>\n\n"
                 "2. Sign in and grant YouTube access.\n"
@@ -71,7 +70,7 @@ def setup_handlers(app, params: Params, state: StateManager):
             await update.effective_message.reply_html(msg, disable_web_page_preview=True)
         except Exception as e:
             logger.error("Failed to generate auth URL for %s: %s", user_id, e)
-            await update.effective_message.reply_text(f"Error starting OAuth flow: {e}")
+            await update.effective_message.reply_text(f"❌ Error starting OAuth flow: {e}")
 
     async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await check_access(update):
@@ -87,7 +86,7 @@ def setup_handlers(app, params: Params, state: StateManager):
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.effective_message.reply_text(
-                "OAuth credentials already exist for your account. Do you want to redo the OAuth process?",
+                "⚠️ OAuth credentials already exist for your account. Do you want to redo the OAuth process?",
                 reply_markup=reply_markup
             )
             return
@@ -103,10 +102,10 @@ def setup_handlers(app, params: Params, state: StateManager):
             return
 
         if query.data == "reauth_confirm":
-            await query.edit_message_text("Starting re-authentication...")
+            await query.edit_message_text("🔄 Starting re-authentication...")
             await start_oauth_flow(update, context, user_id)
         elif query.data == "reauth_cancel":
-            await query.edit_message_text("Re-authentication cancelled.")
+            await query.edit_message_text("❌ Re-authentication cancelled.")
 
     async def perform_sync_subscriptions(update: Update, user_id: int):
         async def send_fn(uid: int, text: str):
@@ -117,12 +116,12 @@ def setup_handlers(app, params: Params, state: StateManager):
                 state, params, user_id, send_message_fn=send_fn
             )
             await update.effective_message.reply_text(
-                f"Successfully synced subscriptions.\n"
+                f"✅ Successfully synced subscriptions.\n"
                 f"Total channels tracked: {total} ({new_count} newly added)."
             )
         except Exception as e:
             logger.error("Failed to sync subscriptions for %s: %s", user_id, e)
-            await update.effective_message.reply_text(f"Error downloading subscriptions: {e}")
+            await update.effective_message.reply_text(f"❌ Error downloading subscriptions: {e}")
 
     async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await check_access(update):
@@ -136,7 +135,7 @@ def setup_handlers(app, params: Params, state: StateManager):
             flow = user_flows.get(user_id)
             if not flow:
                 user_sessions.pop(user_id, None)
-                await update.effective_message.reply_text("Session expired. Please run /start again.")
+                await update.effective_message.reply_text("⚠️ Session expired. Please run /start again.")
                 return
 
             try:
@@ -149,12 +148,12 @@ def setup_handlers(app, params: Params, state: StateManager):
                 user_sessions.pop(user_id, None)
                 user_flows.pop(user_id, None)
 
-                await update.effective_message.reply_text("Authentication successful. Downloading subscribed channels...")
+                await update.effective_message.reply_text("✅ Authentication successful. Downloading subscribed channels...")
                 await perform_sync_subscriptions(update, user_id)
             except Exception as e:
                 logger.error("Failed to exchange code for %s: %s", user_id, e)
                 await update.effective_message.reply_text(
-                    f"Authentication failed: {e}\n"
+                    f"❌ Authentication failed: {e}\n"
                     "Please make sure the code or redirect URL is correct, or run /start to try again."
                 )
             return
@@ -166,11 +165,11 @@ def setup_handlers(app, params: Params, state: StateManager):
         user_id = update.effective_user.id
         if not state.has_user_oauth_credentials(user_id):
             await update.effective_message.reply_text(
-                "You haven't connected your YouTube account yet. Please use the /start command."
+                "⚠️ You haven't connected your YouTube account yet. Please use the /start command."
             )
             return
 
-        await update.effective_message.reply_text("Redownloading subscribed channels...")
+        await update.effective_message.reply_text("🔄 Redownloading subscribed channels...")
         await perform_sync_subscriptions(update, user_id)
 
     async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -179,7 +178,7 @@ def setup_handlers(app, params: Params, state: StateManager):
 
         user_id = update.effective_user.id
         if not params.is_user_admin(user_id):
-            await update.effective_message.reply_text("This command is only available to administrators.")
+            await update.effective_message.reply_text("⛔ This command is only available to administrators.")
             return
 
         state.reload()
@@ -204,7 +203,7 @@ def setup_handlers(app, params: Params, state: StateManager):
         logger.info("Reload check completed in %.2f seconds (%d channels checked).", elapsed, checked)
 
         await update.effective_message.reply_text(
-            f"State reloaded from disk. Checked {checked} channel(s) updated more than 5 minutes ago."
+            f"🔄 State reloaded from disk. Checked {checked} channel(s) updated more than 5 minutes ago."
         )
 
     async def cmd_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -219,13 +218,13 @@ def setup_handlers(app, params: Params, state: StateManager):
             custom_feeds = state.get_user_custom_feeds(user_id)
             if not custom_feeds:
                 msg = (
-                    "You have no custom feeds configured.\n\n"
+                    "ℹ️ You have no custom feeds configured.\n\n"
                     "Use <code>/custom add &lt;url or channel_id&gt;</code> to add one."
                 )
                 await update.effective_message.reply_html(msg)
                 return
 
-            lines = ["<b>Custom RSS Feeds:</b>\n"]
+            lines = ["📡 <b>Custom RSS Feeds:</b>\n"]
             for idx, (url, info) in enumerate(custom_feeds.items(), 1):
                 title = info.get("title") or "Unknown"
                 lines.append(f"{idx}. <b>{html.escape(title)}</b>\n   <code>{html.escape(url)}</code>")
@@ -236,14 +235,14 @@ def setup_handlers(app, params: Params, state: StateManager):
         elif subcmd == "add":
             if len(args) < 2:
                 await update.effective_message.reply_html(
-                    "Usage: <code>/custom add &lt;url or channel_id&gt;</code>"
+                    "ℹ️ Usage: <code>/custom add &lt;url or channel_id&gt;</code>"
                 )
                 return
 
             raw_input = args[1].strip()
             url = normalize_feed_url(raw_input)
             if not (url.startswith("http://") or url.startswith("https://")):
-                await update.effective_message.reply_text("Invalid URL or channel ID.")
+                await update.effective_message.reply_text("❌ Invalid URL or channel ID.")
                 return
 
             try:
@@ -252,7 +251,7 @@ def setup_handlers(app, params: Params, state: StateManager):
                 feed_author, entries = parse_feed(xml_text)
             except Exception as e:
                 await update.effective_message.reply_text(
-                    f"Failed to fetch or parse feed from URL ({e}). Please check that the URL is reachable:\n{url}"
+                    f"❌ Failed to fetch or parse feed from URL ({e}). Please check that the URL is reachable:\n{url}"
                 )
                 return
 
@@ -261,17 +260,17 @@ def setup_handlers(app, params: Params, state: StateManager):
             is_new = state.add_custom_feed(user_id=user_id, url=url, title=feed_title)
             if is_new:
                 await update.effective_message.reply_html(
-                    f"Added custom feed: <b>{html.escape(feed_title)}</b>\n<code>{html.escape(url)}</code>"
+                    f"✅ Added custom feed: <b>{html.escape(feed_title)}</b>\n<code>{html.escape(url)}</code>"
                 )
             else:
                 await update.effective_message.reply_html(
-                    f"Updated custom feed: <b>{html.escape(feed_title)}</b>\n<code>{html.escape(url)}</code>"
+                    f"✅ Updated custom feed: <b>{html.escape(feed_title)}</b>\n<code>{html.escape(url)}</code>"
                 )
 
         elif subcmd == "remove":
             if len(args) < 2:
                 await update.effective_message.reply_html(
-                    "Usage: <code>/custom remove &lt;number or url&gt;</code>"
+                    "ℹ️ Usage: <code>/custom remove &lt;number or url&gt;</code>"
                 )
                 return
 
@@ -280,16 +279,16 @@ def setup_handlers(app, params: Params, state: StateManager):
             if removed:
                 removed_title = removed.get("title") or removed.get("url") or target
                 await update.effective_message.reply_html(
-                    f"Removed custom feed: <b>{html.escape(removed_title)}</b>"
+                    f"✅ Removed custom feed: <b>{html.escape(removed_title)}</b>"
                 )
             else:
                 await update.effective_message.reply_html(
-                    "Feed not found. Use <code>/custom list</code> to see your feeds."
+                    "❌ Feed not found. Use <code>/custom list</code> to see your feeds."
                 )
 
         else:
             msg = (
-                "<b>Custom Feed Commands:</b>\n\n"
+                "📡 <b>Custom Feed Commands:</b>\n\n"
                 "• <code>/custom</code> or <code>/custom list</code> - List your custom feeds\n"
                 "• <code>/custom add &lt;url or channel_id&gt;</code> - Add a custom RSS feed\n"
                 "• <code>/custom remove &lt;number or url&gt;</code> - Remove a custom RSS feed"
@@ -311,7 +310,7 @@ def setup_handlers(app, params: Params, state: StateManager):
         pending_count = len(user_info.get("pending_notifications", []))
 
         msg = (
-            f"<b>YTSub Bot Status</b>\n"
+            f"📊 <b>YTSub Bot Status</b>\n"
             f"• Authenticated: {'Yes' if has_creds else 'No'}\n"
             f"• Tracked channels: {channel_count}\n"
             f"• Custom feeds: {custom_feed_count}\n"
@@ -352,10 +351,10 @@ def setup_handlers(app, params: Params, state: StateManager):
         cleared = state.clear_pending_notifications(user_id)
         if cleared > 0:
             await update.effective_message.reply_html(
-                f"Cleared {cleared} pending notification{'s' if cleared != 1 else ''}."
+                f"🗑️ Cleared {cleared} pending notification{'s' if cleared != 1 else ''}."
             )
         else:
-            await update.effective_message.reply_html("No pending notifications in queue.")
+            await update.effective_message.reply_html("ℹ️ No pending notifications in queue.")
 
     async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await check_access(update):
@@ -377,14 +376,14 @@ def setup_handlers(app, params: Params, state: StateManager):
             "/help - Show this help message"
         ])
 
-        msg = "<b>YTSub Commands:</b>\n\n" + "\n".join(commands)
+        msg = "ℹ️ <b>YTSub Commands:</b>\n\n" + "\n".join(commands)
         await update.effective_message.reply_html(msg)
 
     async def callback_playlist_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         user = update.effective_user
         if not user or not params.is_user_allowed(user.id):
-            await query.answer("Access denied.", show_alert=True)
+            await query.answer("⛔ Access denied.", show_alert=True)
             return
 
         user_id = user.id
@@ -401,13 +400,13 @@ def setup_handlers(app, params: Params, state: StateManager):
         token = user_info.get("token")
         refresh_token = user_info.get("refresh_token")
         if not (token or refresh_token):
-            await query.answer("Please connect your YouTube account with /start first.", show_alert=True)
+            await query.answer("⚠️ Please connect your YouTube account with /start first.", show_alert=True)
             return
 
         client_id = params.google_client_id
         client_secret = params.google_client_secret
         if not (client_id and client_secret):
-            await query.answer("Google credentials not configured on the bot server.", show_alert=True)
+            await query.answer("⚠️ Google credentials not configured on the bot server.", show_alert=True)
             return
 
         if base_action == "wl":
@@ -449,7 +448,7 @@ def setup_handlers(app, params: Params, state: StateManager):
                         else:
                             raise
 
-                await query.answer(f"Removed from {target_title}")
+                await query.answer(f"🗑️ Removed from {target_title}")
                 next_text = unadded_text
                 next_cb = add_cb
             else:
@@ -507,7 +506,7 @@ def setup_handlers(app, params: Params, state: StateManager):
                     else:
                         raise
 
-                await query.answer(f"Added to {target_title}")
+                await query.answer(f"✅ Added to {target_title}")
                 next_text = added_text
                 next_cb = remove_cb
 
@@ -537,7 +536,7 @@ def setup_handlers(app, params: Params, state: StateManager):
         except Exception as e:
             action_name = "removing" if is_remove else "adding"
             logger.error("Error %s video %s to playlist '%s': %s", action_name, video_id, target_title, e)
-            await query.answer(f"Failed: {e}", show_alert=True)
+            await query.answer(f"❌ Failed: {e}", show_alert=True)
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("update", cmd_update))

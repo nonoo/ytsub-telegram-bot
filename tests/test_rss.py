@@ -256,7 +256,7 @@ async def test_feed_error_alert_on_twenty_fifth_failure_and_recovery():
             assert len(sent_messages) == 1
             chat_id, text = sent_messages[0]
             assert chat_id == 101
-            assert text == "Error updating: Broken Channel"
+            assert text == "⚠️ Error updating: Broken Channel"
 
             ch = sm.get_user(101)["channels"]["UC_ERR"]
             assert ch["error_count"] == 50
@@ -277,7 +277,7 @@ async def test_feed_error_alert_on_twenty_fifth_failure_and_recovery():
             assert len(sent_messages) == 2
             chat_id, text = sent_messages[1]
             assert chat_id == 101
-            assert text == "Working again: Broken Channel"
+            assert text == "✅ Working again: Broken Channel"
 
             # State error_count should be reset to 0 and last_error to None
             ch = sm.get_user(101)["channels"]["UC_ERR"]
@@ -314,7 +314,7 @@ async def test_feed_error_alert_batching_and_overflow():
             assert len(sent_messages) == 1
             chat_id, text = sent_messages[0]
             assert chat_id == 101
-            expected_prefix = "Error updating: "
+            expected_prefix = "⚠️ Error updating: "
             assert text.startswith(expected_prefix)
             assert text.endswith(", ... and 2 more")
             # 10 channel names included
@@ -330,7 +330,7 @@ async def test_feed_error_alert_batching_and_overflow():
             assert len(sent_messages) == 1
             chat_id, text = sent_messages[0]
             assert chat_id == 101
-            expected_rec_prefix = "Working again: "
+            expected_rec_prefix = "✅ Working again: "
             assert text.startswith(expected_rec_prefix)
             assert text.endswith(", ... and 2 more")
             rec_names = text[len(expected_rec_prefix):-len(", ... and 2 more")].split(", ")
