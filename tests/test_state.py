@@ -197,23 +197,23 @@ def test_record_and_reset_feed_error():
         assert ch["error_count"] == 0
         assert ch["last_error"] is None
 
-        # Failures 1 through 24 should return False (no alert)
-        for i in range(1, 25):
+        # Failures 1 through 49 should return False (no alert)
+        for i in range(1, 50):
             alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg=f"Err {i}")
             assert alert is False
             assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == i
             assert sm.get_user(1001)["channels"]["UC_A"]["last_error"] == f"Err {i}"
 
-        # 25th failure should return True (trigger alert)
-        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 25")
+        # 50th failure should return True (trigger alert)
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 50")
         assert alert is True
-        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 25
+        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 50
 
-        # 26th failure should increment count to 26 and return False (alert not re-triggered)
-        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 26")
+        # 51st failure should increment count to 51 and return False (alert not re-triggered)
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 51")
         assert alert is False
-        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 26
-        assert sm.get_user(1001)["channels"]["UC_A"]["last_error"] == "Err 26"
+        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 51
+        assert sm.get_user(1001)["channels"]["UC_A"]["last_error"] == "Err 51"
 
         # Error count should cap at INT64_MAX
         sm.get_user(1001)["channels"]["UC_A"]["error_count"] = (1 << 63) - 1
@@ -221,7 +221,7 @@ def test_record_and_reset_feed_error():
         assert alert is False
         assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == (1 << 63) - 1
 
-        # Successful reset after reaching 25 should return True (trigger recovery alert)
+        # Successful reset after reaching 50 should return True (trigger recovery alert)
         recovered = sm.reset_feed_error(1001, is_custom=False, key="UC_A")
         assert recovered is True
         ch_after = sm.get_user(1001)["channels"]["UC_A"]
@@ -231,7 +231,7 @@ def test_record_and_reset_feed_error():
         # Resetting again when count is 0 returns False
         assert sm.reset_feed_error(1001, is_custom=False, key="UC_A") is False
 
-        # Resetting when count was < 25 returns False
+        # Resetting when count was < 50 returns False
         sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Minor err")
         assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 1
         assert sm.reset_feed_error(1001, is_custom=False, key="UC_A") is False
@@ -244,9 +244,9 @@ def test_record_and_reset_feed_error():
         assert feed["error_count"] == 0
         assert feed["last_error"] is None
 
-        for _ in range(24):
+        for _ in range(49):
             sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err")
-        alert = sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err 25")
+        alert = sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err 50")
         assert alert is True
 
         recovered = sm.reset_feed_error(1001, is_custom=True, key=feed_url)

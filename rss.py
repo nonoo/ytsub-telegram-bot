@@ -17,7 +17,7 @@ from state import StateManager, parse_human_datetime, parse_human_timestamp, utc
 
 logger = logging.getLogger(__name__)
 
-ERROR_ALERT_THRESHOLD = 25
+ERROR_ALERT_THRESHOLD = 50
 
 
 class FeedFetchError(Exception):
@@ -414,7 +414,7 @@ async def check_channels_and_notify(
                 continue
             feed_str = ", ".join(err_feeds[:10])
             if len(err_feeds) > 10:
-                feed_str += ", ... and more"
+                feed_str += f", ... and {len(err_feeds) - 10} more"
             msg = f"Error updating: {feed_str}"
             try:
                 await send_message_fn(user_id, msg)
@@ -426,7 +426,7 @@ async def check_channels_and_notify(
                 continue
             feed_str = ", ".join(rec_feeds[:10])
             if len(rec_feeds) > 10:
-                feed_str += ", ... and more"
+                feed_str += f", ... and {len(rec_feeds) - 10} more"
             msg = f"Working again: {feed_str}"
             try:
                 await send_message_fn(user_id, msg)

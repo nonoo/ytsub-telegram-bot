@@ -339,7 +339,7 @@ def setup_handlers(app, params: Params, state: StateManager):
                 err_detail = f": {html.escape(str(last_err))}" if last_err else ""
                 error_lines.append(f"• <b>{html.escape(title)}</b> ({err_count} error{'s' if err_count != 1 else ''}{err_detail})")
             if len(error_feeds) > 10:
-                error_lines.append("...and more")
+                error_lines.append(f"...and {len(error_feeds) - 10} more")
             msg += "\n".join(error_lines)
 
         await update.effective_message.reply_html(msg)

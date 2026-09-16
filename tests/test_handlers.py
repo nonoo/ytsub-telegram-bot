@@ -506,7 +506,7 @@ async def test_cmd_status():
         assert "Feeds with errors:" in reply
         assert "• <b>Channel 1</b> (1 error: HTTP 500)" in reply
         assert "• <b>Custom Feed 1</b> (1 error: HTTP 404)" in reply
-        assert "...and more" not in reply
+        assert "...and " not in reply
 
         # 3. More than 10 feeds with errors
         channels = {f"UC_{i}": f"Channel {i}" for i in range(2, 15)}
@@ -521,8 +521,8 @@ async def test_cmd_status():
         await status_handler.callback(mock_update, context)
         reply = mock_reply_html.call_args[0][0]
         assert "Feeds with errors:" in reply
-        # Should contain ...and more
-        assert "...and more" in reply
+        # Should contain ...and 5 more
+        assert "...and 5 more" in reply
         # Only 10 feed error items listed
         lines = [line for line in reply.split("\n") if line.startswith("• <b>")]
         assert len(lines) == 10

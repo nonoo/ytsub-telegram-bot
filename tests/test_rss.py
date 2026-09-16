@@ -241,8 +241,8 @@ async def test_feed_error_alert_on_twenty_fifth_failure_and_recovery():
         with patch("rss.fetch_channel_rss", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.side_effect = FeedFetchError("HTTP 500")
 
-            # Run 24 failures: error_count goes 1..24, no alert messages sent
-            for i in range(1, 25):
+            # Run 49 failures: error_count goes 1..49, no alert messages sent
+            for i in range(1, 50):
                 checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
                 assert checked == 0
                 assert len(sent_messages) == 0
@@ -250,7 +250,7 @@ async def test_feed_error_alert_on_twenty_fifth_failure_and_recovery():
                 assert ch["error_count"] == i
                 assert ch["last_error"] == "HTTP 500"
 
-            # 25th failure: alert message must be sent to user
+            # 50th failure: alert message must be sent to user
             checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
             assert checked == 0
             assert len(sent_messages) == 1
@@ -259,15 +259,15 @@ async def test_feed_error_alert_on_twenty_fifth_failure_and_recovery():
             assert text == "Error updating: Broken Channel"
 
             ch = sm.get_user(101)["channels"]["UC_ERR"]
-            assert ch["error_count"] == 25
+            assert ch["error_count"] == 50
 
-            # 26th failure: error_count increments to 26, no new alert sent
+            # 51st failure: error_count increments to 51, no new alert sent
             checked = await check_channels_and_notify(state=sm, send_message_fn=mock_send)
             assert checked == 0
             assert len(sent_messages) == 1
-            assert sm.get_user(101)["channels"]["UC_ERR"]["error_count"] == 26
+            assert sm.get_user(101)["channels"]["UC_ERR"]["error_count"] == 51
 
-            # 27th run: feed recovers!
+            # 52nd run: feed recovers!
             mock_fetch.side_effect = None
             mock_fetch.return_value = SAMPLE_FEED
 
@@ -291,7 +291,7 @@ async def test_feed_error_alert_batching_and_overflow():
         sm = StateManager(f"{tmpdir}/state.json")
         sm.get_user(101)["token"] = "valid_token"
 
-        # Create 12 channels for user 101, each already with 24 errors
+        # Create 12 channels for user 101, each already with 49 errors
         channels = {}
         for i in range(1, 13):
             ch_id = f"UC_{i:02d}"
@@ -299,7 +299,7 @@ async def test_feed_error_alert_batching_and_overflow():
         sm.sync_user_channels(101, channels)
 
         for ch_id in channels:
-            sm.get_user(101)["channels"][ch_id]["error_count"] = 24
+            sm.get_user(101)["channels"][ch_id]["error_count"] = 49
 
         sent_messages = []
 
@@ -309,19 +309,19 @@ async def test_feed_error_alert_batching_and_overflow():
         with patch("rss.fetch_channel_rss", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.side_effect = FeedFetchError("HTTP 500")
 
-            # 25th failure for all 12 channels -> exactly ONE batched message sent with first 10 and '... and more'
+            # 50th failure for all 12 channels -> exactly ONE batched message sent with first 10 and '... and 2 more'
             await check_channels_and_notify(state=sm, send_message_fn=mock_send)
             assert len(sent_messages) == 1
             chat_id, text = sent_messages[0]
             assert chat_id == 101
             expected_prefix = "Error updating: "
             assert text.startswith(expected_prefix)
-            assert text.endswith(", ... and more")
+            assert text.endswith(", ... and 2 more")
             # 10 channel names included
-            feed_names = text[len(expected_prefix):-len(", ... and more")].split(", ")
+            feed_names = text[len(expected_prefix):-len(", ... and 2 more")].split(", ")
             assert len(feed_names) == 10
 
-            # Now all 12 channels recover -> exactly ONE batched recovery message sent with first 10 and '... and more'
+            # Now all 12 channels recover -> exactly ONE batched recovery message sent with first 10 and '... and 2 more'
             sent_messages.clear()
             mock_fetch.side_effect = None
             mock_fetch.return_value = SAMPLE_FEED
@@ -332,8 +332,8 @@ async def test_feed_error_alert_batching_and_overflow():
             assert chat_id == 101
             expected_rec_prefix = "Working again: "
             assert text.startswith(expected_rec_prefix)
-            assert text.endswith(", ... and more")
-            rec_names = text[len(expected_rec_prefix):-len(", ... and more")].split(", ")
+            assert text.endswith(", ... and 2 more")
+            rec_names = text[len(expected_rec_prefix):-len(", ... and 2 more")].split(", ")
             assert len(rec_names) == 10
 
 

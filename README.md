@@ -132,7 +132,7 @@ Each authorized user can independently connect their YouTube account and receive
    Both playlists are created automatically in your YouTube library if they don't already exist. Clicking a button adds the video, switches the button to a checkmark (`✅ Watch Later` / `✅ Listen Later`), and displays a toast notification. Clicking a checkmarked button removes the video from the playlist and reverts the button back to its initial state.
 
 6. **State persistence**: User access tokens, cached playlist IDs, channel update timestamps, and pending notification queues are persisted atomically to `ytsub-state.json`.
-7. **Feed error detection & recovery alerts**: If a feed cannot be fetched or parsed, the latest error and consecutive error count are recorded in `ytsub-state.json` (increasing up to int64 max). When a periodic update cycle completes, feeds that reached 10 consecutive failures are aggregated into a single user alert (e.g. `Error updating: Feed A, Feed B, ... and more` if more than 10 feeds). Likewise, recovering feeds are aggregated into a single recovery notification (`Working again: Feed A, Feed B, ... and more`).
+7. **Feed error detection & recovery alerts**: If a feed cannot be fetched or parsed, the latest error and consecutive error count are recorded in `ytsub-state.json` (increasing up to int64 max). When a periodic update cycle completes, feeds that reached 50 consecutive failures are aggregated into a single user alert (e.g. `Error updating: Feed A, Feed B, ... and 5 more` if more than 10 feeds). Likewise, recovering feeds are aggregated into a single recovery notification (`Working again: Feed A, Feed B, ... and 5 more`).
 
 ## Contributors
 

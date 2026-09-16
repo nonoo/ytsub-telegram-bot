@@ -366,7 +366,7 @@ class StateManager:
         is_custom: bool,
         key: str,
         error_msg: str,
-        threshold: int = 25
+        threshold: int = 50
     ) -> bool:
         """
         Increments error_count (capped at INT64_MAX) and updates last_error.
@@ -391,7 +391,7 @@ class StateManager:
         user_id: int,
         is_custom: bool,
         key: str,
-        threshold: int = 25
+        threshold: int = 50
     ) -> bool:
         """
         Resets error_count to 0 and clears last_error when a feed is processed successfully.

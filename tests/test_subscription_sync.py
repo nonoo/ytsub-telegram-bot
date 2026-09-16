@@ -245,13 +245,13 @@ def test_format_channel_delta_log():
     # More than 10 channels added
     added_12 = [f"Add {i}" for i in range(1, 13)]
     msg = format_channel_delta_log(added_12, ["Rem 1"])
-    expected_added = ", ".join(f"Add {i}" for i in range(1, 11)) + ", and more"
+    expected_added = ", ".join(f"Add {i}" for i in range(1, 11)) + ", and 2 more"
     assert msg == f"Added channels: {expected_added}\nRemoved channels: Rem 1"
 
     # More than 10 channels removed
     rem_12 = [f"Rem {i}" for i in range(1, 13)]
     msg = format_channel_delta_log(["Add 1"], rem_12)
-    expected_rem = ", ".join(f"Rem {i}" for i in range(1, 11)) + ", and more"
+    expected_rem = ", ".join(f"Rem {i}" for i in range(1, 11)) + ", and 2 more"
     assert msg == f"Added channels: Add 1\nRemoved channels: {expected_rem}"
 
     # Only added

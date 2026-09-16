@@ -81,7 +81,7 @@ ytsub-telegram-bot/
   - `generate_auth_url(client_id, client_secret)`: Initiates OAuth flow with offline consent.
   - `exchange_code_for_tokens(flow, code_or_url)`: Extracts code and exchanges for tokens.
   - `fetch_user_subscriptions(client_id, client_secret, token, refresh_token)`: Retrieves channels with pagination and handles automatic token refreshing.
-  - `sync_user_subscriptions(state, params, user_id, send_message_fn=None)`: Synchronizes YouTube channel subscriptions for a user and updates state, logging and messaging added and removed channels to the user upon completion (`"Added channels: ...\nRemoved channels: ..."`, truncated with `", and more"` after 10 items in a row).
+  - `sync_user_subscriptions(state, params, user_id, send_message_fn=None)`: Synchronizes YouTube channel subscriptions for a user and updates state, logging and messaging added and removed channels to the user upon completion (`"Added channels: ...\nRemoved channels: ..."`, truncated with `", and <count> more"` after 10 items in a row).
   - `sync_all_subscriptions(state, params, send_message_fn=None)`: Iterates all allowed users with OAuth credentials and synchronizes their subscriptions asynchronously in worker threads.
   - `find_or_create_playlist(client_id, client_secret, token, refresh_token, title)`: Finds or creates a private YouTube playlist (e.g. `YTSub Watch Later` or `YTSub Listen Later`).
   - `add_video_to_playlist(client_id, client_secret, token, refresh_token, playlist_id, video_id)`: Appends a video to the specified YouTube playlist.
@@ -97,7 +97,7 @@ ytsub-telegram-bot/
   - `check_channels_and_notify()`: Deduplicates and polls feed URLs across users, enqueuing new videos into `state.enqueue_notification()` (decoupled from immediate sending; optional `auto_dispatch` for direct sync).
   - `dispatch_pending_notifications()`: Continuous dispatcher implementing Option A rate limiting (bursts up to `max_posts_per_min` within rolling 60-second windows with 0.2s pause between posts), calculating relative elapsed time at moment of delivery, formatting channel title in bold HTML without brackets (`<b>{title}</b>`), and dropping blocked users.
 - Supports `min_seconds_since_check` thresholding (used by `/reload` to filter feeds checked > 300s ago).
-- Error tracking and alert dispatching: detects HTTP and XML parsing failures, records `error_count` and `last_error` in state (capping `error_count` at int64 max). When the periodic check completes, groups newly failing feeds (at 25 consecutive failures) into a single notification (`Error updating: Feed A, Feed B, ... and more` for >10 feeds) and grouped recovery notifications (`Working again: Feed A, Feed B, ... and more`).
+- Error tracking and alert dispatching: detects HTTP and XML parsing failures, records `error_count` and `last_error` in state (capping `error_count` at int64 max). When the periodic check completes, groups newly failing feeds (at 50 consecutive failures) into a single notification (`Error updating: Feed A, Feed B, ... and <count> more` for >10 feeds) and grouped recovery notifications (`Working again: Feed A, Feed B, ... and <count> more`).
 
 ### `handlers.py`
 - Implements Telegram interactions using `python-telegram-bot` v21+:
@@ -106,7 +106,7 @@ ytsub-telegram-bot/
   - `/custom`: Manage custom RSS feeds (subcommands: `list`, `add <url_or_channel_id>`, `remove <number_or_url>`).
   - `/stop`: Clear user's pending notification queue from state.
   - `/reload`: Admin-only command. Reloads state from disk and checks channels/feeds older than 5 minutes.
-  - `/status`: Displays authenticated status, tracked channel count, custom feed count, pending notification count, check interval, and any feeds with errors (capped at 10 items, with "...and more" if exceeding).
+  - `/status`: Displays authenticated status, tracked channel count, custom feed count, pending notification count, check interval, and any feeds with errors (capped at 10 items, with "...and <count> more" if exceeding).
   - `/help`: Command summary (dynamically includes `/reload` only for admins).
   - Callback queries: Handles `reauth_*` confirmations, and `wl:*` / `ll:*` / `rwl:*` / `rll:*` playlist additions and removals with toggleable button states and toast confirmations.
 

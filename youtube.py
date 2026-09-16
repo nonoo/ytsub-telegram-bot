@@ -241,15 +241,15 @@ def remove_video_from_playlist(
 def format_channel_delta_log(added_titles: List[str], removed_titles: List[str]) -> Optional[str]:
     """
     Formats the delta of added and removed channel titles for logging.
-    If there are more than 10 channels in a row, adds ', and more'.
+    If there are more than 10 channels in a row, adds ', and X more'.
     Returns None if neither added nor removed channels exist.
     """
     lines = []
     if added_titles:
-        added_str = ", ".join(added_titles[:10]) + (", and more" if len(added_titles) > 10 else "")
+        added_str = ", ".join(added_titles[:10]) + (f", and {len(added_titles) - 10} more" if len(added_titles) > 10 else "")
         lines.append(f"Added channels: {added_str}")
     if removed_titles:
-        removed_str = ", ".join(removed_titles[:10]) + (", and more" if len(removed_titles) > 10 else "")
+        removed_str = ", ".join(removed_titles[:10]) + (f", and {len(removed_titles) - 10} more" if len(removed_titles) > 10 else "")
         lines.append(f"Removed channels: {removed_str}")
     if lines:
         return "\n".join(lines)
