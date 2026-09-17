@@ -337,4 +337,9 @@ def test_pending_notifications_state():
         assert sm2.clear_pending_notifications(1001) == 0
 
 
-
+def test_state_manager_type_hints():
+    import typing
+    for attr_name in dir(StateManager):
+        attr = getattr(StateManager, attr_name)
+        if callable(attr):
+            typing.get_type_hints(attr)
