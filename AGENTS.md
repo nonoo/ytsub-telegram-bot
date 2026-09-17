@@ -22,6 +22,7 @@ This document outlines the codebase architecture, design patterns, state managem
 
 ```
 ytsub-telegram-bot/
+├── .dockerignore                 # Excludes local state, venv, secrets, and dev files from Docker builds
 ├── .gitignore                    # Ignores sensitive config, state, and .venv
 ├── .venv/                        # Host Python virtual environment (ignored in git)
 ├── AGENTS.md                     # Architecture reference for AI agents

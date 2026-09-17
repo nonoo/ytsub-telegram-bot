@@ -1,0 +1,20 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+__pycache__
+*.py[cod]
+
+# State, credentials, and local configurations
+ytsub-state*.json
+config.inc*.sh
+client_secret*.json
+*.json
+
+# Development, tests, and documentation
+tests/
+pytest.ini
+*.sh
+*.md
+LICENSE
+logo.png
