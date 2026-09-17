@@ -81,50 +81,7 @@ class StateManager:
                 else:
                     self.data = {"users": {}}
 
-            # Clean up / migrate: Ensure only human format is used for last_checked and last_published.
-            # Also remove legacy client_id, client_secret, and chat_id if present.
-            migrated = False
-            for user in self.data.get("users", {}).values():
-                if "client_id" in user:
-                    user.pop("client_id", None)
-                    migrated = True
-                if "client_secret" in user:
-                    user.pop("client_secret", None)
-                    migrated = True
-                if "chat_id" in user:
-                    user.pop("chat_id", None)
-                    migrated = True
-                if "pending_notifications" not in user:
-                    user["pending_notifications"] = []
-
-                for ch in user.get("channels", {}).values():
-                    # last_checked
-                    if "last_checked_human" in ch:
-                        ch["last_checked"] = ch.pop("last_checked_human")
-                        migrated = True
-                    elif isinstance(ch.get("last_checked"), (int, float)):
-                        ch["last_checked"] = format_human_timestamp(epoch=ch["last_checked"])
-                        migrated = True
-
-                    # last_published
-                    if "last_published_human" in ch:
-                        ch["last_published"] = ch.pop("last_published_human")
-                        migrated = True
-                    elif "last_published" in ch:
-                        lp_val = ch["last_published"]
-                        if isinstance(lp_val, str) and not lp_val.endswith(" UTC"):
-                            dt = parse_human_datetime(lp_val)
-                            if dt:
-                                ch["last_published"] = format_human_timestamp(dt=dt)
-                                migrated = True
-                        elif not isinstance(lp_val, str):
-                            dt = parse_human_datetime(lp_val)
-                            if dt:
-                                ch["last_published"] = format_human_timestamp(dt=dt)
-                                migrated = True
-            if migrated:
-                self.save()
-
+            # Ensure users dict is present
             logger.info("Loaded state from %s (tracked users: %d)", self.file_path, len(self.data["users"]))
         except Exception as e:
             logger.error("Failed to load state file %s: %s", self.file_path, e)
@@ -287,7 +244,6 @@ class StateManager:
         if is_new:
             feeds[url] = {
                 "title": title,
-                "url": url,
                 "last_published": now_human,
                 "last_checked": now_human,
                 "error_count": 0,
@@ -295,14 +251,13 @@ class StateManager:
             }
         else:
             feeds[url]["title"] = title
-            feeds[url]["url"] = url
         self.save()
         return is_new
 
     def remove_custom_feed(self, user_id: int, identifier: str) -> Optional[Dict[str, Any]]:
         """
         Removes a custom feed by 1-based index or by exact URL.
-        Returns the removed feed dict (including 'title' and 'url') if found, or None.
+        Returns the removed feed dict (including 'title') if found, or None.
         """
         user = self.get_user(user_id)
         feeds = user.get("custom_feeds", {})

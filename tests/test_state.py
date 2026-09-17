@@ -59,30 +59,6 @@ def test_state_multi_user_and_persistence():
         assert "chat_id" not in sm2.get_user(1001)
 
 
-def test_state_removes_legacy_client_credentials():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        state_file = os.path.join(tmpdir, "test-legacy.json")
-        with open(state_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "users": {
-                    "123": {
-                        "chat_id": 123,
-                        "client_id": "old-id",
-                        "client_secret": "old-secret",
-                        "token": "tok",
-                        "refresh_token": "ref",
-                        "channels": {}
-                    }
-                }
-            }, f)
-        sm = StateManager(state_file)
-        sm.load()
-        u = sm.get_user(123)
-        assert "client_id" not in u
-        assert "client_secret" not in u
-        assert "chat_id" not in u
-
-
 def test_update_channel_timestamps():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_file = os.path.join(tmpdir, "test-state.json")
@@ -138,6 +114,8 @@ def test_custom_feeds_state():
         feeds = sm.get_user_custom_feeds(1001)
         assert len(feeds) == 2
         assert feeds[feed_url1]["title"] == "Channel 1 Updated"
+        assert "url" not in feeds[feed_url1]
+        assert "url" not in feeds[feed_url2]
         assert "UTC" in feeds[feed_url1]["last_published"]
         assert "UTC" in feeds[feed_url1]["last_checked"]
 
@@ -153,13 +131,15 @@ def test_custom_feeds_state():
         # Remove by index "1"
         removed1 = sm.remove_custom_feed(1001, "1")
         assert removed1 is not None
-        assert removed1["url"] == feed_url1
+        assert removed1["title"] == "Channel 1 Updated"
+        assert "url" not in removed1
         assert len(sm.get_user_custom_feeds(1001)) == 1
 
         # Remove by URL
         removed2 = sm.remove_custom_feed(1001, feed_url2)
         assert removed2 is not None
-        assert removed2["url"] == feed_url2
+        assert removed2["title"] == "Channel 2"
+        assert "url" not in removed2
         assert len(sm.get_user_custom_feeds(1001)) == 0
 
         # Remove non-existent returns None

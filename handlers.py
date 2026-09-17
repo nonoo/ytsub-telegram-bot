@@ -277,7 +277,7 @@ def setup_handlers(app, params: Params, state: StateManager):
             target = args[1].strip()
             removed = state.remove_custom_feed(user_id=user_id, identifier=target)
             if removed:
-                removed_title = removed.get("title") or removed.get("url") or target
+                removed_title = removed.get("title") or target
                 await update.effective_message.reply_html(
                     f"✅ Removed custom feed: <b>{html.escape(removed_title)}</b>"
                 )
