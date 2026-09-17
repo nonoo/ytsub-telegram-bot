@@ -343,3 +343,24 @@ def test_state_manager_type_hints():
         attr = getattr(StateManager, attr_name)
         if callable(attr):
             typing.get_type_hints(attr)
+
+
+def test_state_file_path_absolute_and_logged(caplog):
+    import logging
+    rel_path = "test-relative-state.json"
+    abs_path = os.path.abspath(rel_path)
+    sm = StateManager(rel_path)
+    assert sm.file_path == abs_path
+
+    with caplog.at_level(logging.INFO):
+        sm.load()
+        assert f"State file {abs_path} does not exist" in caplog.text
+
+    caplog.clear()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = os.path.join(tmpdir, "state.json")
+        sm_temp = StateManager(tmp_path)
+        sm_temp.save()
+        with caplog.at_level(logging.INFO):
+            sm_temp.load()
+            assert f"Loaded state from {tmp_path}" in caplog.text

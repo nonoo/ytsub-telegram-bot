@@ -62,7 +62,7 @@ INT64_MAX = (1 << 63) - 1
 
 class StateManager:
     def __init__(self, file_path: str = "ytsub-state.json"):
-        self.file_path = file_path
+        self.file_path = os.path.abspath(file_path)
         self.data: Dict[str, Any] = {"users": {}}
 
     def load(self) -> None:
