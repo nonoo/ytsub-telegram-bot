@@ -109,7 +109,7 @@ Each authorized user can independently connect their YouTube account and receive
   - `/custom remove <number_or_url>`: Remove a custom feed by its list number or exact URL.
 - `/stop`: Clear your pending notification queue.
 - `/reload`: Reload the state from `ytsub-state.json` and perform RSS feed updates on channels updated more than 5 minutes ago (admin only).
-- `/status`: Show current tracking status (channels tracked, custom feeds, pending notifications queue, check interval, authentication state, and any feeds with errors).
+- `/status`: Show current tracking status (channels tracked, custom feeds, pending notifications queue, check interval, authentication state, and any feeds with errors sorted by error count descending).
 - `/help`: Display the list of available commands.
 
 ## How it works

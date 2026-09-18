@@ -333,6 +333,7 @@ def setup_handlers(app, params: Params, state: StateManager):
                 error_feeds.append((title, err_count, f_info.get("last_error")))
 
         if error_feeds:
+            error_feeds.sort(key=lambda x: x[1], reverse=True)
             error_lines = ["\n\n<b>Feeds with errors:</b>"]
             for title, err_count, last_err in error_feeds[:10]:
                 err_detail = f": {html.escape(str(last_err))}" if last_err else ""

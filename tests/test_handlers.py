@@ -496,16 +496,19 @@ async def test_cmd_status():
         assert "Tracked channels: 1" in reply
         assert "Feeds with errors:" not in reply
 
-        # 2. Feeds with errors (< 10)
+        # 2. Feeds with errors (< 10) - sorted by error count descending
         sm.record_feed_error(1001, is_custom=False, key="UC_1", error_msg="HTTP 500")
         sm.add_custom_feed(1001, "https://example.com/rss", "Custom Feed 1")
+        sm.record_feed_error(1001, is_custom=True, key="https://example.com/rss", error_msg="HTTP 404")
         sm.record_feed_error(1001, is_custom=True, key="https://example.com/rss", error_msg="HTTP 404")
 
         await status_handler.callback(mock_update, context)
         reply = mock_reply_html.call_args[0][0]
         assert "Feeds with errors:" in reply
+        assert "• <b>Custom Feed 1</b> (2 errors: HTTP 404)" in reply
         assert "• <b>Channel 1</b> (1 error: HTTP 500)" in reply
-        assert "• <b>Custom Feed 1</b> (1 error: HTTP 404)" in reply
+        # Verify Custom Feed 1 appears before Channel 1 due to higher error count (2 vs 1)
+        assert reply.index("Custom Feed 1") < reply.index("Channel 1")
         assert "...and " not in reply
 
         # 3. More than 10 feeds with errors
