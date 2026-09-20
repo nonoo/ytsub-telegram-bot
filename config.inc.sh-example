@@ -5,6 +5,7 @@ STATE_FILE=ytsub-state.json
 CHECK_INTERVAL_SEC=300
 SUBSCRIPTION_SYNC_INTERVAL_SEC=43200
 MAX_POSTS_PER_MIN=10
+ERROR_ALERT_SEC=21600
 
 # Google OAuth 2.0 Credentials (for YouTube API access)
 # Set either client ID & secret, or point to client_secret.json (or put client_secret.json in the bot directory)

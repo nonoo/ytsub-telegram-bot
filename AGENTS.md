@@ -57,7 +57,7 @@ ytsub-telegram-bot/
 ## 3. Module Responsibilities
 
 ### `params.py`
-- Parses CLI arguments (`--bot-token`, `--admin-user-ids`, `--allowed-user-ids`, `--state-file`, `--check-interval-sec`, `--subscription-sync-interval-sec`, `--max-posts-per-min`, `--google-client-id`, `--google-client-secret`, `--google-client-secret-file`) and matching OS environment variables (`BOT_TOKEN`, `ADMIN_USERIDS`, `ALLOWED_USERIDS`, `STATE_FILE`, `CHECK_INTERVAL_SEC`, `SUBSCRIPTION_SYNC_INTERVAL_SEC`, `MAX_POSTS_PER_MIN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET_FILE`). Auto-detects `client_secret.json` in the working directory if present.
+- Parses CLI arguments (`--bot-token`, `--admin-user-ids`, `--allowed-user-ids`, `--state-file`, `--check-interval-sec`, `--subscription-sync-interval-sec`, `--max-posts-per-min`, `--error-alert-sec`, `--error-alert-hours`, `--google-client-id`, `--google-client-secret`, `--google-client-secret-file`) and matching OS environment variables (`BOT_TOKEN`, `ADMIN_USERIDS`, `ALLOWED_USERIDS`, `STATE_FILE`, `CHECK_INTERVAL_SEC`, `SUBSCRIPTION_SYNC_INTERVAL_SEC`, `MAX_POSTS_PER_MIN`, `ERROR_ALERT_SEC`, `ERROR_ALERT_HOURS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET_FILE`). Auto-detects `client_secret.json` in the working directory if present.
 - Manages user access lists (`is_user_allowed`, `is_user_admin`). Admin users are automatically included in allowed users.
 
 ### `state.py`
@@ -67,8 +67,8 @@ ytsub-telegram-bot/
 - Tracks channel and custom feed timestamps:
   - `last_published` in human format (`YYYY-MM-DD HH:MM:SS UTC`).
   - `last_checked` in human format (`YYYY-MM-DD HH:MM:SS UTC`).
-  - `error_count` (int, default 0, capped at int64 max) and `last_error` (string or null).
-- Handles subscription syncing: `sync_user_channels()` sets current timestamp for new channels so past videos are not alerted, strictly preserves existing metadata (`last_published`, `last_checked`, `error_count`, `last_error`) for retained channels, and preserves `custom_feeds`.
+  - `first_error` (`YYYY-MM-DD HH:MM:SS UTC` or null), `last_error` (string or null), and `error_alerted` (boolean).
+- Handles subscription syncing: `sync_user_channels()` sets current timestamp for new channels so past videos are not alerted, strictly preserves existing metadata (`last_published`, `last_checked`, `first_error`, `last_error`, `error_alerted`) for retained channels, and preserves `custom_feeds`.
 - Manages custom RSS feeds: `get_user_custom_feeds()`, `add_custom_feed()`, `remove_custom_feed()`, `update_custom_feed_timestamps()`.
 - Tracks errors and recoveries: `record_feed_error()` and `reset_feed_error()`.
 - Manages persistent pending notifications outbox: `enqueue_notification()` (with URL deduplication), `get_pending_notifications()`, `peek_pending_notification()`, `pop_pending_notification()`, `clear_pending_notifications()`, `get_users_with_pending_notifications()`, and `get_pending_notifications_count()`.
@@ -98,7 +98,7 @@ ytsub-telegram-bot/
   - `check_channels_and_notify()`: Deduplicates and polls feed URLs across users, enqueuing new videos into `state.enqueue_notification()` (decoupled from immediate sending; optional `auto_dispatch` for direct sync).
   - `dispatch_pending_notifications()`: Continuous dispatcher implementing Option A rate limiting (bursts up to `max_posts_per_min` within rolling 60-second windows with 0.2s pause between posts), calculating relative elapsed time at moment of delivery, formatting channel title in bold HTML without brackets (`<b>{title}</b>`), and dropping blocked users.
 - Supports `min_seconds_since_check` thresholding (used by `/reload` to filter feeds checked > 300s ago).
-- Error tracking and alert dispatching: detects HTTP and XML parsing failures, records `error_count` and `last_error` in state (capping `error_count` at int64 max). When the periodic check completes, groups newly failing feeds (at 50 consecutive failures) into a single notification (`⚠️ Error updating: Feed A, Feed B, ... and <count> more` for >10 feeds) and grouped recovery notifications (`✅ Working again: Feed A, Feed B, ... and <count> more`).
+- Error tracking and alert dispatching: detects HTTP and XML parsing failures, records `first_error` timestamp and `last_error` in state. When feeds fail continuously for `error_alert_sec` (default: 6 hours), groups newly failing feeds into a single notification (`⚠️ Error updating: Feed A, Feed B, ... and <count> more` for >10 feeds) and grouped recovery notifications upon recovery (`✅ Working again: Feed A, Feed B, ... and <count> more`).
 
 ### `handlers.py`
 - Implements Telegram interactions using `python-telegram-bot` v21+:
@@ -107,7 +107,7 @@ ytsub-telegram-bot/
   - `/custom`: Manage custom RSS feeds (subcommands: `list`, `add <url_or_channel_id>`, `remove <number_or_url>`).
   - `/stop`: Clear user's pending notification queue from state.
   - `/reload`: Admin-only command. Reloads state from disk and checks channels/feeds older than 5 minutes.
-  - `/status`: Displays authenticated status, tracked channel count, custom feed count, pending notification count, check interval, and any feeds with errors (sorted by error count descending, capped at 10 items, with "...and <count> more" if exceeding).
+  - `/status`: Displays authenticated status, tracked channel count, custom feed count, pending notification count, check interval, and any feeds with errors (sorted by first error timestamp, displaying `failing since <first_error>: <last_error>`, capped at 10 items, with "...and <count> more" if exceeding).
   - `/help`: Command summary (dynamically includes `/reload` only for admins).
   - Callback queries: Handles `reauth_*` confirmations, and `wl:*` / `ll:*` / `rwl:*` / `rll:*` playlist additions and removals with toggleable button states and toast confirmations.
 
@@ -138,8 +138,9 @@ ytsub-telegram-bot/
           "title": "Google Developers",
           "last_published": "2026-09-13 10:00:00 UTC",
           "last_checked": "2026-09-13 11:25:00 UTC",
-          "error_count": 0,
-          "last_error": null
+          "first_error": null,
+          "last_error": null,
+          "error_alerted": false
         }
       },
       "custom_feeds": {
@@ -147,8 +148,9 @@ ytsub-telegram-bot/
           "title": "Google Developers",
           "last_published": "2026-09-13 14:00:00 UTC",
           "last_checked": "2026-09-13 14:05:00 UTC",
-          "error_count": 0,
-          "last_error": null
+          "first_error": null,
+          "last_error": null,
+          "error_alerted": false
         }
       },
       "pending_notifications": [

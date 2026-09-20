@@ -1,7 +1,7 @@
 import json
 import os
 import tempfile
-import pytest
+from datetime import datetime, timezone, timedelta
 from state import StateManager, format_human_timestamp
 
 
@@ -174,65 +174,79 @@ def test_record_and_reset_feed_error():
         # 1. Test regular channel
         sm.sync_user_channels(1001, {"UC_A": "Channel A"})
         ch = sm.get_user(1001)["channels"]["UC_A"]
-        assert ch["error_count"] == 0
+        assert ch.get("error_count") is None
+        assert ch["first_error"] is None
         assert ch["last_error"] is None
+        assert ch["error_alerted"] is False
 
-        # Failures 1 through 49 should return False (no alert)
-        for i in range(1, 50):
-            alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg=f"Err {i}")
-            assert alert is False
-            assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == i
-            assert sm.get_user(1001)["channels"]["UC_A"]["last_error"] == f"Err {i}"
+        t0 = datetime(2026, 9, 20, 10, 0, 0, tzinfo=timezone.utc)
 
-        # 50th failure should return True (trigger alert)
-        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 50")
+        # First failure at t0 should return False (no alert yet) and set first_error
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 1", now_dt=t0, timeout_sec=21600)
+        assert alert is False
+        ch = sm.get_user(1001)["channels"]["UC_A"]
+        assert ch["first_error"] == "2026-09-20 10:00:00 UTC"
+        assert ch["last_error"] == "Err 1"
+        assert ch["error_alerted"] is False
+
+        # Another failure at t0 + 2 hours should return False, keep original first_error, and update last_error
+        t2 = t0 + timedelta(hours=2)
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 2", now_dt=t2, timeout_sec=21600)
+        assert alert is False
+        ch = sm.get_user(1001)["channels"]["UC_A"]
+        assert ch["first_error"] == "2026-09-20 10:00:00 UTC"
+        assert ch["last_error"] == "Err 2"
+        assert ch["error_alerted"] is False
+
+        # Failure at t0 + 6 hours (21600 seconds) should return True (trigger alert!) and set error_alerted=True
+        t6 = t0 + timedelta(hours=6)
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 6h", now_dt=t6, timeout_sec=21600)
         assert alert is True
-        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 50
+        ch = sm.get_user(1001)["channels"]["UC_A"]
+        assert ch["error_alerted"] is True
+        assert ch["last_error"] == "Err 6h"
 
-        # 51st failure should increment count to 51 and return False (alert not re-triggered)
-        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 51")
+        # Subsequent failure at t0 + 7 hours should return False (do not re-trigger alert)
+        t7 = t0 + timedelta(hours=7)
+        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err 7h", now_dt=t7, timeout_sec=21600)
         assert alert is False
-        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 51
-        assert sm.get_user(1001)["channels"]["UC_A"]["last_error"] == "Err 51"
+        ch = sm.get_user(1001)["channels"]["UC_A"]
+        assert ch["error_alerted"] is True
 
-        # Error count should cap at INT64_MAX
-        sm.get_user(1001)["channels"]["UC_A"]["error_count"] = (1 << 63) - 1
-        alert = sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Err max")
-        assert alert is False
-        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == (1 << 63) - 1
-
-        # Successful reset after reaching 50 should return True (trigger recovery alert)
+        # Successful reset after alert should return True (trigger recovery alert) and clear errors
         recovered = sm.reset_feed_error(1001, is_custom=False, key="UC_A")
         assert recovered is True
         ch_after = sm.get_user(1001)["channels"]["UC_A"]
-        assert ch_after["error_count"] == 0
+        assert ch_after["first_error"] is None
         assert ch_after["last_error"] is None
+        assert ch_after["error_alerted"] is False
 
-        # Resetting again when count is 0 returns False
+        # Resetting again when already healthy returns False
         assert sm.reset_feed_error(1001, is_custom=False, key="UC_A") is False
 
-        # Resetting when count was < 50 returns False
-        sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Minor err")
-        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 1
+        # Resetting when failure occurred but alert was not reached (< 6h) returns False
+        sm.record_feed_error(1001, is_custom=False, key="UC_A", error_msg="Minor err", now_dt=t0, timeout_sec=21600)
+        assert sm.get_user(1001)["channels"]["UC_A"]["first_error"] is not None
         assert sm.reset_feed_error(1001, is_custom=False, key="UC_A") is False
-        assert sm.get_user(1001)["channels"]["UC_A"]["error_count"] == 0
+        assert sm.get_user(1001)["channels"]["UC_A"]["first_error"] is None
 
         # 2. Test custom feed
         feed_url = "https://example.com/rss.xml"
         sm.add_custom_feed(1001, feed_url, "Custom Feed")
         feed = sm.get_user_custom_feeds(1001)[feed_url]
-        assert feed["error_count"] == 0
+        assert feed["first_error"] is None
         assert feed["last_error"] is None
+        assert feed["error_alerted"] is False
 
-        for _ in range(49):
-            sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err")
-        alert = sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err 50")
+        sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err initial", now_dt=t0, timeout_sec=21600)
+        alert = sm.record_feed_error(1001, is_custom=True, key=feed_url, error_msg="Err 6h", now_dt=t6, timeout_sec=21600)
         assert alert is True
 
         recovered = sm.reset_feed_error(1001, is_custom=True, key=feed_url)
         assert recovered is True
-        assert sm.get_user_custom_feeds(1001)[feed_url]["error_count"] == 0
+        assert sm.get_user_custom_feeds(1001)[feed_url]["first_error"] is None
         assert sm.get_user_custom_feeds(1001)[feed_url]["last_error"] is None
+        assert sm.get_user_custom_feeds(1001)[feed_url]["error_alerted"] is False
 
 
 def test_pending_notifications_state():

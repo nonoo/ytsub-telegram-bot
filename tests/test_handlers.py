@@ -1,5 +1,6 @@
 import logging
 import tempfile
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -496,27 +497,28 @@ async def test_cmd_status():
         assert "Tracked channels: 1" in reply
         assert "Feeds with errors:" not in reply
 
-        # 2. Feeds with errors (< 10) - sorted by error count descending
-        sm.record_feed_error(1001, is_custom=False, key="UC_1", error_msg="HTTP 500")
+        # 2. Feeds with errors (< 10) - sorted by first_error timestamp
+        t0 = datetime(2026, 9, 20, 10, 0, 0, tzinfo=timezone.utc)
+        t1 = datetime(2026, 9, 20, 10, 5, 0, tzinfo=timezone.utc)
+        sm.record_feed_error(1001, is_custom=False, key="UC_1", error_msg="HTTP 500", now_dt=t0)
         sm.add_custom_feed(1001, "https://example.com/rss", "Custom Feed 1")
-        sm.record_feed_error(1001, is_custom=True, key="https://example.com/rss", error_msg="HTTP 404")
-        sm.record_feed_error(1001, is_custom=True, key="https://example.com/rss", error_msg="HTTP 404")
+        sm.record_feed_error(1001, is_custom=True, key="https://example.com/rss", error_msg="HTTP 404", now_dt=t1)
 
         await status_handler.callback(mock_update, context)
         reply = mock_reply_html.call_args[0][0]
         assert "Feeds with errors:" in reply
-        assert "• <b>Custom Feed 1</b> (2 errors: HTTP 404)" in reply
-        assert "• <b>Channel 1</b> (1 error: HTTP 500)" in reply
-        # Verify Custom Feed 1 appears before Channel 1 due to higher error count (2 vs 1)
-        assert reply.index("Custom Feed 1") < reply.index("Channel 1")
+        assert "• <b>Channel 1</b> (failing since 2026-09-20 10:00:00 UTC: HTTP 500)" in reply
+        assert "• <b>Custom Feed 1</b> (failing since 2026-09-20 10:05:00 UTC: HTTP 404)" in reply
+        # Verify Channel 1 appears before Custom Feed 1 due to earlier first_error
+        assert reply.index("Channel 1") < reply.index("Custom Feed 1")
         assert "...and " not in reply
 
         # 3. More than 10 feeds with errors
-        channels = {f"UC_{i}": f"Channel {i}" for i in range(2, 15)}
+        channels = {f"UC_{i}": f"Channel {i:02d}" for i in range(2, 15)}
         for ch_id, ch_title in channels.items():
             sm.get_user(1001)["channels"][ch_id] = {
                 "title": ch_title,
-                "error_count": 3,
+                "first_error": "2026-09-20 11:00:00 UTC",
                 "last_error": "Connection timeout"
             }
         sm.save()

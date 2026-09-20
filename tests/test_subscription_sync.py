@@ -53,7 +53,7 @@ async def test_sync_user_subscriptions_unauthenticated():
 async def test_sync_preserves_existing_channel_metadata():
     """
     Ensure running subscription sync (periodic or /update) does not reset
-    last_published, last_checked, error_count, last_error for channels that remain in state.
+    last_published, last_checked, first_error, last_error, error_alerted for channels that remain in state.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         state_file = f"{tmpdir}/state.json"
@@ -71,15 +71,17 @@ async def test_sync_preserves_existing_channel_metadata():
                 "title": "Old Name",
                 "last_published": "2026-01-01 10:00:00 UTC",
                 "last_checked": "2026-01-01 10:05:00 UTC",
-                "error_count": 7,
-                "last_error": "503 Service Unavailable"
+                "first_error": "2026-01-01 10:05:00 UTC",
+                "last_error": "503 Service Unavailable",
+                "error_alerted": True
             },
             "UC_LEAVING": {
                 "title": "Unsubscribed Channel",
                 "last_published": "2026-01-01 08:00:00 UTC",
                 "last_checked": "2026-01-01 08:05:00 UTC",
-                "error_count": 0,
-                "last_error": None
+                "first_error": None,
+                "last_error": None,
+                "error_alerted": False
             }
         }
         sm.save()
@@ -106,8 +108,10 @@ async def test_sync_preserves_existing_channel_metadata():
             assert staying_ch["title"] == "New Name"
             assert staying_ch["last_published"] == "2026-01-01 10:00:00 UTC"
             assert staying_ch["last_checked"] == "2026-01-01 10:05:00 UTC"
-            assert staying_ch["error_count"] == 7
+            assert staying_ch.get("error_count") is None
+            assert staying_ch["first_error"] == "2026-01-01 10:05:00 UTC"
             assert staying_ch["last_error"] == "503 Service Unavailable"
+            assert staying_ch["error_alerted"] is True
 
             # UC_LEAVING must be removed
             assert "UC_LEAVING" not in channels_after
@@ -115,8 +119,10 @@ async def test_sync_preserves_existing_channel_metadata():
             # UC_NEW must be initialized fresh
             new_ch = channels_after["UC_NEW"]
             assert new_ch["title"] == "Brand New Channel"
-            assert new_ch["error_count"] == 0
+            assert new_ch.get("error_count") is None
+            assert new_ch["first_error"] is None
             assert new_ch["last_error"] is None
+            assert new_ch["error_alerted"] is False
             assert "UTC" in new_ch["last_published"]
             assert "UTC" in new_ch["last_checked"]
 
@@ -126,8 +132,10 @@ async def test_sync_preserves_existing_channel_metadata():
             persisted_staying = sm2.get_user(1001)["channels"]["UC_STAYS"]
             assert persisted_staying["last_published"] == "2026-01-01 10:00:00 UTC"
             assert persisted_staying["last_checked"] == "2026-01-01 10:05:00 UTC"
-            assert persisted_staying["error_count"] == 7
+            assert persisted_staying.get("error_count") is None
+            assert persisted_staying["first_error"] == "2026-01-01 10:05:00 UTC"
             assert persisted_staying["last_error"] == "503 Service Unavailable"
+            assert persisted_staying["error_alerted"] is True
 
 
 @pytest.mark.asyncio

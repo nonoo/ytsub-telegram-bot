@@ -161,8 +161,10 @@ class StateManager:
             if ch_id in existing_channels:
                 ch_data = dict(existing_channels[ch_id])
                 ch_data["title"] = title
-                ch_data.setdefault("error_count", 0)
+                ch_data.pop("error_count", None)
+                ch_data.setdefault("first_error", None)
                 ch_data.setdefault("last_error", None)
+                ch_data.setdefault("error_alerted", False)
                 updated_channels[ch_id] = ch_data
             else:
                 new_count += 1
@@ -170,8 +172,9 @@ class StateManager:
                     "title": title,
                     "last_published": now_human,
                     "last_checked": now_human,
-                    "error_count": 0,
-                    "last_error": None
+                    "first_error": None,
+                    "last_error": None,
+                    "error_alerted": False
                 }
 
         user["channels"] = updated_channels
@@ -246,8 +249,9 @@ class StateManager:
                 "title": title,
                 "last_published": now_human,
                 "last_checked": now_human,
-                "error_count": 0,
-                "last_error": None
+                "first_error": None,
+                "last_error": None,
+                "error_alerted": False
             }
         else:
             feeds[url]["title"] = title
@@ -320,13 +324,17 @@ class StateManager:
         user_id: int,
         is_custom: bool,
         key: str,
-        error_msg: str,
-        threshold: int = 50
+        error_msg: Any,
+        now_dt: Optional[datetime] = None,
+        timeout_sec: float = 21600.0,
     ) -> bool:
         """
-        Increments error_count (capped at INT64_MAX) and updates last_error.
-        Returns True if error_count just reached threshold (transitioned from threshold-1 to threshold),
-        prompting a notification to the user. Returns False otherwise.
+        Records an error for a channel or custom feed.
+        Sets first_error timestamp if this is the start of an error sequence.
+        Updates last_error with error_msg.
+        Returns True if continuous error duration has reached or exceeded timeout_sec
+        and an alert has not yet been triggered for this failure episode.
+        Returns False otherwise.
         """
         user = self.get_user(user_id)
         container = user.get("custom_feeds" if is_custom else "channels", {})
@@ -334,23 +342,45 @@ class StateManager:
             return False
 
         feed = container[key]
-        prev_count = feed.get("error_count", 0)
-        new_count = min(prev_count + 1, INT64_MAX)
-        feed["error_count"] = new_count
+        feed.pop("error_count", None)
+
+        now = now_dt if now_dt is not None else utc_now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+
+        first_err_val = feed.get("first_error")
+        if not first_err_val:
+            first_err_val = format_human_timestamp(dt=now)
+            feed["first_error"] = first_err_val
+
         feed["last_error"] = str(error_msg)
+
+        first_err_dt = parse_human_datetime(first_err_val)
+        if first_err_dt is None:
+            first_err_dt = now
+
+        elapsed_sec = (now - first_err_dt).total_seconds()
+        already_alerted = bool(feed.get("error_alerted", False))
+
+        should_alert = False
+        if elapsed_sec >= timeout_sec and not already_alerted:
+            feed["error_alerted"] = True
+            should_alert = True
+
         self.save()
-        return bool(new_count == threshold and prev_count < threshold)
+        return should_alert
 
     def reset_feed_error(
         self,
         user_id: int,
         is_custom: bool,
         key: str,
-        threshold: int = 50
+        **kwargs: Any
     ) -> bool:
         """
-        Resets error_count to 0 and clears last_error when a feed is processed successfully.
-        Returns True if the feed had previously reached the error threshold, prompting a recovery notification.
+        Clears error state (first_error, last_error, error_alerted) when a feed is processed successfully.
+        Returns True if the feed had previously triggered an error alert (error_alerted was True),
+        prompting a recovery notification.
         """
         user = self.get_user(user_id)
         container = user.get("custom_feeds" if is_custom else "channels", {})
@@ -358,19 +388,24 @@ class StateManager:
             return False
 
         feed = container[key]
-        prev_count = feed.get("error_count", 0)
+        was_alerted = bool(feed.get("error_alerted", False))
+        feed.pop("error_count", None)
+
         has_changes = False
-        if prev_count > 0:
-            feed["error_count"] = 0
+        if feed.get("first_error") is not None:
+            feed["first_error"] = None
             has_changes = True
         if feed.get("last_error") is not None:
             feed["last_error"] = None
+            has_changes = True
+        if feed.get("error_alerted"):
+            feed["error_alerted"] = False
             has_changes = True
 
         if has_changes:
             self.save()
 
-        return bool(prev_count >= threshold)
+        return was_alerted
 
     def enqueue_notification(
         self,

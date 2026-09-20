@@ -17,6 +17,7 @@ class Params:
         self.check_interval_sec: int = 300
         self.subscription_sync_interval_sec: int = 43200
         self.max_posts_per_min: int = 10
+        self.error_alert_sec: int = 21600
         self.google_client_id: str = ""
         self.google_client_secret: str = ""
         self.google_client_secret_file: str = ""
@@ -34,6 +35,8 @@ class Params:
         parser.add_argument("--check-interval-sec", "--check-interval", dest="check_interval_sec", type=int, default=0, help="Channel RSS check interval in seconds")
         parser.add_argument("--subscription-sync-interval-sec", dest="subscription_sync_interval_sec", type=int, default=0, help="YouTube subscription sync interval in seconds (default: 43200 / 12 hours)")
         parser.add_argument("--max-posts-per-min", type=int, default=None, help="Max video post notifications sent per minute per user (default: 10, set to 0 to disable)")
+        parser.add_argument("--error-alert-sec", "--error-alert-threshold-sec", dest="error_alert_sec", type=int, default=None, help="Feed error alert threshold in seconds (default: 21600 / 6 hours)")
+        parser.add_argument("--error-alert-hours", dest="error_alert_hours", type=float, default=None, help="Feed error alert threshold in hours (default: 6)")
         parser.add_argument("--google-client-id", default="", help="Google OAuth Client ID")
         parser.add_argument("--google-client-secret", default="", help="Google OAuth Client Secret")
         parser.add_argument("--google-client-secret-file", default="", help="Path to client_secret.json file")
@@ -95,6 +98,25 @@ class Params:
             if val < 0:
                 raise ValueError(f"--max-posts-per-min must be >= 0: {val}")
             self.max_posts_per_min = val
+
+        error_alert_hours_val = parsed.error_alert_hours if parsed.error_alert_hours is not None else os.getenv("ERROR_ALERT_HOURS", "")
+        error_alert_sec_val = parsed.error_alert_sec if parsed.error_alert_sec is not None else os.getenv("ERROR_ALERT_SEC", os.getenv("ERROR_ALERT_THRESHOLD_SEC", ""))
+        if error_alert_hours_val != "" and error_alert_hours_val is not None:
+            try:
+                hours = float(error_alert_hours_val)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"invalid error alert hours: {error_alert_hours_val}") from e
+            if hours <= 0:
+                raise ValueError(f"--error-alert-hours must be > 0: {hours}")
+            self.error_alert_sec = int(hours * 3600)
+        elif error_alert_sec_val != "" and error_alert_sec_val is not None:
+            try:
+                val = int(error_alert_sec_val)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"invalid error alert sec: {error_alert_sec_val}") from e
+            if val <= 0:
+                raise ValueError(f"--error-alert-sec must be > 0: {val}")
+            self.error_alert_sec = val
 
         allowed_raw = parsed.allowed_user_ids or os.getenv("ALLOWED_USERIDS", "")
         if allowed_raw:

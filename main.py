@@ -72,6 +72,8 @@ logger = logging.getLogger("ytsub")
 
 async def scheduled_rss_check(context: ContextTypes.DEFAULT_TYPE):
     state: StateManager = context.job.data["state"]
+    params: Optional[Params] = context.job.data.get("params")
+    error_alert_sec = params.error_alert_sec if params else 21600
 
     async def send_fn(chat_id: int, text: str, reply_markup: Optional[Any] = None, parse_mode: Optional[Any] = None):
         await context.bot.send_message(
@@ -83,7 +85,7 @@ async def scheduled_rss_check(context: ContextTypes.DEFAULT_TYPE):
         )
 
     try:
-        await check_channels_and_notify(state=state, send_message_fn=send_fn)
+        await check_channels_and_notify(state=state, send_message_fn=send_fn, error_alert_sec=error_alert_sec)
     except Exception as e:
         logger.error("Error in scheduled RSS check: %s", e)
 
@@ -162,7 +164,7 @@ def main():
         scheduled_rss_check,
         interval=interval,
         first=15,
-        data={"state": state},
+        data={"state": state, "params": params},
         name="rss_check"
     )
     logger.info("Scheduled RSS polling job every %d seconds.", interval)

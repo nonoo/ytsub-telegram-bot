@@ -17,7 +17,8 @@ from state import StateManager, parse_human_datetime, parse_human_timestamp, utc
 
 logger = logging.getLogger(__name__)
 
-ERROR_ALERT_THRESHOLD = 50
+DEFAULT_ERROR_ALERT_SEC = 21600  # 6 hours
+ERROR_ALERT_THRESHOLD = DEFAULT_ERROR_ALERT_SEC
 
 
 class FeedFetchError(Exception):
@@ -241,7 +242,8 @@ async def check_channels_and_notify(
     min_seconds_since_check: float = 0.0,
     auto_dispatch: bool = False,
     max_posts_per_min: int = 10,
-    user_send_times: Optional[Dict[int, List[float]]] = None
+    user_send_times: Optional[Dict[int, List[float]]] = None,
+    error_alert_sec: float = DEFAULT_ERROR_ALERT_SEC
 ) -> int:
     """
     Checks subscribed channels and custom feeds and notifies users about new videos.
@@ -332,7 +334,7 @@ async def check_channels_and_notify(
                             is_custom=is_custom,
                             key=key,
                             error_msg=error_msg,
-                            threshold=ERROR_ALERT_THRESHOLD
+                            timeout_sec=error_alert_sec
                         )
                         if should_alert:
                             if display_title not in user_errors_to_alert[user_id]:
@@ -361,8 +363,7 @@ async def check_channels_and_notify(
                     was_failing = state.reset_feed_error(
                         user_id=user_id,
                         is_custom=is_custom,
-                        key=key,
-                        threshold=ERROR_ALERT_THRESHOLD
+                        key=key
                     )
                     if was_failing:
                         if display_title not in user_recoveries_to_alert[user_id]:

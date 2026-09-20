@@ -49,6 +49,7 @@ You can configure the bot via command-line arguments or environment variables.
 - `CHECK_INTERVAL_SEC`: RSS polling interval in seconds (default: `300` / 5 minutes)
 - `SUBSCRIPTION_SYNC_INTERVAL_SEC`: YouTube subscription sync interval in seconds (default: `43200` / 12 hours)
 - `MAX_POSTS_PER_MIN`: Max video post notifications sent per minute per user (default: `10`, set to `0` to disable rate limiting)
+- `ERROR_ALERT_SEC`: Feed error alert threshold in seconds (default: `21600` / 6 hours, also configurable via `--error-alert-hours` / `ERROR_ALERT_HOURS`)
 - `GOOGLE_CLIENT_ID`: Google OAuth Client ID (optional, or put `client_secret.json` in bot directory)
 - `GOOGLE_CLIENT_SECRET`: Google OAuth Client Secret (optional)
 - `GOOGLE_CLIENT_SECRET_FILE`: Path to `client_secret.json` (auto-detected if `client_secret.json` is in the bot root)
@@ -109,7 +110,7 @@ Each authorized user can independently connect their YouTube account and receive
   - `/custom remove <number_or_url>`: Remove a custom feed by its list number or exact URL.
 - `/stop`: Clear your pending notification queue.
 - `/reload`: Reload the state from `ytsub-state.json` and perform RSS feed updates on channels updated more than 5 minutes ago (admin only).
-- `/status`: Show current tracking status (channels tracked, custom feeds, pending notifications queue, check interval, authentication state, and any feeds with errors sorted by error count descending).
+- `/status`: Show current tracking status (channels tracked, custom feeds, pending notifications queue, check interval, authentication state, and any feeds with errors sorted by first error timestamp).
 - `/help`: Display the list of available commands.
 
 ## How it works
@@ -132,7 +133,7 @@ Each authorized user can independently connect their YouTube account and receive
    Both playlists are created automatically in your YouTube library if they don't already exist. Clicking a button adds the video, switches the button to a checkmark (`✅ Watch Later` / `✅ Listen Later`), and displays a toast notification. Clicking a checkmarked button removes the video from the playlist and reverts the button back to its initial state.
 
 6. **State persistence**: User access tokens, cached playlist IDs, channel update timestamps, and pending notification queues are persisted atomically to `ytsub-state.json`.
-7. **Feed error detection & recovery alerts**: If a feed cannot be fetched or parsed, the latest error and consecutive error count are recorded in `ytsub-state.json` (increasing up to int64 max). When a periodic update cycle completes, feeds that reached 50 consecutive failures are aggregated into a single user alert (e.g. `⚠️ Error updating: Feed A, Feed B, ... and 5 more` if more than 10 feeds). Likewise, recovering feeds are aggregated into a single recovery notification (`✅ Working again: Feed A, Feed B, ... and 5 more`).
+7. **Feed error detection & recovery alerts**: If a feed cannot be fetched or parsed, the start timestamp and latest error are recorded in `ytsub-state.json`. If a feed continuously fails for 6 hours (configurable with `ERROR_ALERT_SEC` / `ERROR_ALERT_HOURS`), it triggers a batched user alert (e.g. `⚠️ Error updating: Feed A, Feed B, ... and 5 more` if more than 10 feeds). Likewise, when a previously alerted feed recovers, it is aggregated into a batched recovery notification (`✅ Working again: Feed A, Feed B, ... and 5 more`).
 
 ## Contributors
 

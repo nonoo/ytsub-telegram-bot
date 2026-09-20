@@ -197,7 +197,8 @@ def setup_handlers(app, params: Params, state: StateManager):
         checked = await check_channels_and_notify(
             state=state,
             send_message_fn=send_fn,
-            min_seconds_since_check=300.0
+            min_seconds_since_check=300.0,
+            error_alert_sec=params.error_alert_sec
         )
         elapsed = time.time() - start_time
         logger.info("Reload check completed in %.2f seconds (%d channels checked).", elapsed, checked)
@@ -321,23 +322,23 @@ def setup_handlers(app, params: Params, state: StateManager):
 
         error_feeds = []
         for ch_id, ch_info in channels.items():
-            err_count = ch_info.get("error_count", 0)
-            if err_count > 0:
+            first_err = ch_info.get("first_error")
+            if first_err:
                 title = ch_info.get("title") or ch_id
-                error_feeds.append((title, err_count, ch_info.get("last_error")))
+                error_feeds.append((title, first_err, ch_info.get("last_error")))
 
         for f_url, f_info in custom_feeds.items():
-            err_count = f_info.get("error_count", 0)
-            if err_count > 0:
+            first_err = f_info.get("first_error")
+            if first_err:
                 title = f_info.get("title") or f_url
-                error_feeds.append((title, err_count, f_info.get("last_error")))
+                error_feeds.append((title, first_err, f_info.get("last_error")))
 
         if error_feeds:
-            error_feeds.sort(key=lambda x: x[1], reverse=True)
+            error_feeds.sort(key=lambda x: str(x[1]))
             error_lines = ["\n\n<b>Feeds with errors:</b>"]
-            for title, err_count, last_err in error_feeds[:10]:
+            for title, first_err, last_err in error_feeds[:10]:
                 err_detail = f": {html.escape(str(last_err))}" if last_err else ""
-                error_lines.append(f"• <b>{html.escape(title)}</b> ({err_count} error{'s' if err_count != 1 else ''}{err_detail})")
+                error_lines.append(f"• <b>{html.escape(title)}</b> (failing since {first_err}{err_detail})")
             if len(error_feeds) > 10:
                 error_lines.append(f"...and {len(error_feeds) - 10} more")
             msg += "\n".join(error_lines)

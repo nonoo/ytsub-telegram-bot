@@ -127,3 +127,48 @@ def test_params_subscription_sync_interval_validation(monkeypatch):
         p2.parse([])
 
 
+def test_params_error_alert_cli():
+    p = Params()
+    p.parse([
+        "--bot-token", "123:test",
+        "--error-alert-sec", "7200"
+    ])
+    assert p.error_alert_sec == 7200
+
+    p_hours = Params()
+    p_hours.parse([
+        "--bot-token", "123:test",
+        "--error-alert-hours", "2.5"
+    ])
+    assert p_hours.error_alert_sec == int(2.5 * 3600)
+
+
+def test_params_error_alert_env(monkeypatch):
+    monkeypatch.setenv("BOT_TOKEN", "123:test")
+    monkeypatch.setenv("ERROR_ALERT_SEC", "14400")
+    p = Params()
+    p.parse([])
+    assert p.error_alert_sec == 14400
+
+    monkeypatch.setenv("ERROR_ALERT_HOURS", "4")
+    p_hours = Params()
+    p_hours.parse([])
+    assert p_hours.error_alert_sec == 4 * 3600
+
+
+def test_params_error_alert_validation():
+    p = Params()
+    with pytest.raises(ValueError, match="--error-alert-sec must be > 0"):
+        p.parse([
+            "--bot-token", "123:test",
+            "--error-alert-sec", "0"
+        ])
+
+    p2 = Params()
+    with pytest.raises(ValueError, match="--error-alert-hours must be > 0"):
+        p2.parse([
+            "--bot-token", "123:test",
+            "--error-alert-hours", "-1"
+        ])
+
+
