@@ -118,11 +118,11 @@ Each authorized user can independently connect their YouTube account and receive
 1. **Subscription synchronization & quiet initial sync**: The bot automatically synchronizes subscribed channels from the YouTube Data API v3 on application startup and every 12 hours in the background. You can also trigger an on-demand sync at any time using `/update`. When channels or custom feeds are first added, existing videos are not spammed; the current timestamp is recorded in `ytsub-state.json`.
 2. **Periodic feed checks**: Every 5 minutes (configurable with `CHECK_INTERVAL_SEC`), the bot checks Atom/RSS feeds for all tracked YouTube channels and custom feeds. Unique feed URLs are polled concurrently and deduplicated.
 3. **Persistent outbox & rate-limited delivery**: Detected video notifications are saved to a persistent queue in `ytsub-state.json` and delivered gradually according to `MAX_POSTS_PER_MIN` (default: 10/min per user). If notifications arrive within the rate limit (e.g. 8 videos), they are delivered immediately in a burst. If the bot is stopped for hours or a large backlog accumulates, posts are not lost and will be delivered gradually across rolling 60-second windows without spamming or triggering Telegram rate limits. Users can clear their pending backlog at any time using `/stop`.
-4. **Targeted notifications & relative timestamps**: Each video notification displays the channel title in bold (without brackets) and includes a relative timestamp calculated at the time of delivery:
+4. **Targeted notifications & Shorts marker**: Each video notification displays the channel title in bold (without brackets). Videos whose URL contains `/shorts/` (YouTube Shorts) are marked with a `(🤏)` suffix after the URL:
    ```
-   {channel_title} https://www.youtube.com/watch?v={video_id} ({time_ago})
+   {channel_title} https://www.youtube.com/watch?v={video_id}
    ```
-   *(e.g. `Google Developers https://www.youtube.com/watch?v=abcd1234efg (5m ago)` with bold channel name)*
+   *(e.g. `Google Developers https://www.youtube.com/watch?v=abcd1234efg` with bold channel name; a Shorts video is delivered as `https://www.youtube.com/shorts/abcd1234efg (🤏)`)*
    Sent only to users subscribed to that channel or custom feed.
 5. **Watch Later & Listen Later buttons**: Each video notification contains two inline action buttons:
    - `🕒 Watch Later`: Adds the video to your private **`YTSub Watch Later`** playlist on YouTube.

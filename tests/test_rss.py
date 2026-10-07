@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import tempfile
 import time
 from unittest.mock import AsyncMock, patch
@@ -80,8 +79,9 @@ async def test_check_channels_and_notify_user_isolation(caplog):
             assert len(sent_messages) == 1
             chat_id, text, reply_markup = sent_messages[0]
             assert chat_id == 101
-            assert text.startswith("<b>Channel X</b> https://www.youtube.com/watch?v=vid222")
-            assert "ago)" in text
+            assert text == "<b>Channel X</b> https://www.youtube.com/watch?v=vid222"
+            assert "ago" not in text
+            assert "(🤏)" not in text
             assert reply_markup is not None
             buttons = reply_markup.inline_keyboard[0]
             assert len(buttons) == 2
@@ -218,8 +218,9 @@ async def test_check_custom_feeds_and_notify():
             assert len(sent_messages) == 1
             chat_id, text, reply_markup = sent_messages[0]
             assert chat_id == 101
-            assert text.startswith("<b>Custom Author</b> https://www.youtube.com/watch?v=cust1")
-            assert "ago)" in text
+            assert text == "<b>Custom Author</b> https://www.youtube.com/watch?v=cust1"
+            assert "ago" not in text
+            assert "(🤏)" not in text
             assert reply_markup is not None
             buttons = reply_markup.inline_keyboard[0]
             assert buttons[0].callback_data == "wl:cust1"
@@ -368,33 +369,6 @@ async def test_feed_parse_error_tracking():
             assert "Invalid feed format" in feed["last_error"]
 
 
-def test_format_time_ago():
-    from rss import format_time_ago
-    from datetime import datetime, timezone, timedelta
-
-    base = datetime(2026, 9, 13, 12, 0, 0, tzinfo=timezone.utc)
-
-    # < 1 min -> Xs ago
-    assert format_time_ago(base - timedelta(seconds=0), now_dt=base) == "0s ago"
-    assert format_time_ago(base - timedelta(seconds=5), now_dt=base) == "5s ago"
-    assert format_time_ago(base - timedelta(seconds=59), now_dt=base) == "59s ago"
-
-    # 1 min to 59 mins -> Xm ago
-    assert format_time_ago(base - timedelta(seconds=60), now_dt=base) == "1m ago"
-    assert format_time_ago(base - timedelta(minutes=5), now_dt=base) == "5m ago"
-    assert format_time_ago(base - timedelta(minutes=59, seconds=59), now_dt=base) == "59m ago"
-
-    # 60 mins to 23 hours -> Xh ago
-    assert format_time_ago(base - timedelta(hours=1), now_dt=base) == "1h ago"
-    assert format_time_ago(base - timedelta(hours=5), now_dt=base) == "5h ago"
-    assert format_time_ago(base - timedelta(hours=23, minutes=59), now_dt=base) == "23h ago"
-
-    # >= 24 hours -> Xd ago
-    assert format_time_ago(base - timedelta(days=1), now_dt=base) == "1d ago"
-    assert format_time_ago(base - timedelta(days=5), now_dt=base) == "5d ago"
-    assert format_time_ago(base - timedelta(days=365), now_dt=base) == "365d ago"
-
-
 @pytest.mark.asyncio
 async def test_dispatch_pending_notifications_burst_and_rate_limiting():
     from rss import dispatch_pending_notifications
@@ -517,82 +491,50 @@ async def test_dispatch_pending_notifications_user_isolation_and_error():
 
 
 @pytest.mark.asyncio
-async def test_all_video_messages_always_include_relative_timestamp():
+async def test_shorts_marker_suffix():
     from rss import dispatch_pending_notifications
     from datetime import datetime, timezone, timedelta
 
     with tempfile.TemporaryDirectory() as tmpdir:
         sm = StateManager(f"{tmpdir}/state.json")
-
         now = datetime.now(timezone.utc)
 
-        # 1. Fresh video (10s ago)
         sm.enqueue_notification(
-            user_id=101,
-            title="Channel A",
-            url="https://youtube.com/watch?v=fresh",
-            video_id="fresh",
-            published=(now - timedelta(seconds=10)).isoformat()
-        )
-
-        # 2. Older video (3 hours ago)
+            user_id=101, title="Channel A",
+            url="https://www.youtube.com/watch?v=normal1", video_id="normal1",
+            published=(now - timedelta(hours=3)).isoformat())
         sm.enqueue_notification(
-            user_id=101,
-            title="Channel B",
-            url="https://youtube.com/watch?v=older",
-            video_id="older",
-            published=(now - timedelta(hours=3)).isoformat()
-        )
-
-        # 3. Notification with no published date provided (fallback to now)
+            user_id=101, title="Channel B",
+            url="https://www.youtube.com/shorts/shorts1xxxx", video_id="shorts1xxxx",
+            published=(now - timedelta(minutes=15)).isoformat())
         sm.enqueue_notification(
-            user_id=101,
-            title="Channel C",
-            url="https://youtube.com/watch?v=nopub",
-            video_id="nopub",
-            published=None
-        )
-
-        # 4. Notification with empty title
+            user_id=101, title="",
+            url="https://www.youtube.com/shorts/notitlexxxx", video_id="notitlexxxx",
+            published=(now - timedelta(seconds=30)).isoformat())
         sm.enqueue_notification(
-            user_id=101,
-            title="",
-            url="https://youtube.com/watch?v=notitle",
-            video_id="notitle",
-            published=(now - timedelta(minutes=15)).isoformat()
-        )
-
-        # 5. Notification with HTML special characters in channel title
+            user_id=101, title="Rock & Roll <Live>",
+            url="https://www.youtube.com/shorts/escapedxxxx", video_id="escapedxxxx",
+            published=(now - timedelta(seconds=30)).isoformat())
         sm.enqueue_notification(
-            user_id=101,
-            title="Rock & Roll <Live>",
-            url="https://youtube.com/watch?v=escaped",
-            video_id="escaped",
-            published=(now - timedelta(seconds=30)).isoformat()
-        )
+            user_id=101, title="Channel C",
+            url="https://youtube.com/watch?v=nopub", video_id="nopub",
+            published=None)
 
         sent_messages = []
 
         async def mock_send(chat_id: int, text: str, reply_markup=None):
             sent_messages.append((chat_id, text))
 
-        await dispatch_pending_notifications(
-            state=sm,
-            send_message_fn=mock_send,
-            max_posts_per_min=0
-        )
+        await dispatch_pending_notifications(state=sm, send_message_fn=mock_send, max_posts_per_min=0)
 
         assert len(sent_messages) == 5
-
-        # Every single message must end with a relative timestamp in parentheses
-        for chat_id, text in sent_messages:
-            assert re.search(r"\(\d+(?:s|m|h|d) ago\)$", text), f"Message does not end with relative timestamp: {text}"
-
-        assert "<b>Channel A</b> https://youtube.com/watch?v=fresh" in sent_messages[0][1]
-        assert "<b>Channel B</b> https://youtube.com/watch?v=older (3h ago)" in sent_messages[1][1]
-        assert "<b>Channel C</b> https://youtube.com/watch?v=nopub" in sent_messages[2][1]
-        assert sent_messages[3][1].startswith("https://youtube.com/watch?v=notitle (15m ago)")
-        assert "<b>Rock &amp; Roll &lt;Live&gt;</b> https://youtube.com/watch?v=escaped (30s ago)" == sent_messages[4][1]
+        assert sent_messages[0][1] == "<b>Channel A</b> https://www.youtube.com/watch?v=normal1"
+        assert sent_messages[1][1] == "<b>Channel B</b> https://www.youtube.com/shorts/shorts1xxxx (🤏)"
+        assert sent_messages[2][1] == "https://www.youtube.com/shorts/notitlexxxx (🤏)"
+        assert sent_messages[3][1] == "<b>Rock &amp; Roll &lt;Live&gt;</b> https://www.youtube.com/shorts/escapedxxxx (🤏)"
+        assert sent_messages[4][1] == "<b>Channel C</b> https://youtube.com/watch?v=nopub"
+        for _, text in sent_messages:
+            assert "ago" not in text
 
 
 

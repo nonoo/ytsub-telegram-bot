@@ -94,9 +94,8 @@ ytsub-telegram-bot/
   - `normalize_feed_url(input_str)`: Expands channel IDs (`UC...`) or YouTube channel/playlist URLs to valid RSS feed URLs.
   - `extract_feed_author(root)`: Extracts author/channel name from XML (`<author><name>` or `<author>`), falling back to `<title>`.
   - `parse_feed(xml_text)`: Parses Atom (`<entry>`) and RSS (`<item>`) feeds, extracting `video_id`, title, URL, and timestamps.
-  - `format_time_ago(published_dt)`: Formats relative time elapsed since publication (`Xs ago` for <60s, `Xm ago` for <60m, `Xh ago` for <24h, `Xd ago` for >=24h).
   - `check_channels_and_notify()`: Deduplicates and polls feed URLs across users, enqueuing new videos into `state.enqueue_notification()` (decoupled from immediate sending; optional `auto_dispatch` for direct sync).
-  - `dispatch_pending_notifications()`: Continuous dispatcher implementing Option A rate limiting (bursts up to `max_posts_per_min` within rolling 60-second windows with 0.2s pause between posts), calculating relative elapsed time at moment of delivery, formatting channel title in bold HTML without brackets (`<b>{title}</b>`), and dropping blocked users.
+  - `dispatch_pending_notifications()`: Continuous dispatcher implementing Option A rate limiting (bursts up to `max_posts_per_min` within rolling 60-second windows with 0.2s pause between posts), formatting channel title in bold HTML without brackets (`<b>{title}</b>`), appending ` (🤏)` to messages whose video URL contains `/shorts/`, and dropping blocked users.
 - Supports `min_seconds_since_check` thresholding (used by `/reload` to filter feeds checked > 300s ago).
 - Error tracking and alert dispatching: detects HTTP and XML parsing failures, records `first_error` timestamp and `last_error` in state. When feeds fail continuously for `error_alert_sec` (default: 6 hours), groups newly failing feeds into a single notification (`⚠️ Error updating: Feed A, Feed B, ... and <count> more` for >10 feeds) and grouped recovery notifications upon recovery (`✅ Working again: Feed A, Feed B, ... and <count> more`).
 

@@ -49,33 +49,6 @@ def normalize_feed_url(input_str: str) -> str:
     return s
 
 
-def format_time_ago(published_dt: datetime, now_dt: Optional[datetime] = None) -> str:
-    """
-    Formats the elapsed time since published_dt in human format:
-    - Under 1 minute: '(Xs ago)' (e.g. '5s ago')
-    - Under 60 minutes: '(Xm ago)' (e.g. '5m ago')
-    - 60 minutes to 23 hours: '(Xh ago)' (e.g. '5h ago')
-    - 24 hours or more: '(Xd ago)' (e.g. '5d ago')
-    """
-    if now_dt is None:
-        now_dt = datetime.now(timezone.utc)
-    if published_dt.tzinfo is None:
-        published_dt = published_dt.replace(tzinfo=timezone.utc)
-    elapsed = max(0, int((now_dt - published_dt).total_seconds()))
-
-    if elapsed < 60:
-        return f"{elapsed}s ago"
-    elif elapsed < 3600:
-        mins = elapsed // 60
-        return f"{mins}m ago"
-    elif elapsed < 86400:
-        hours = elapsed // 3600
-        return f"{hours}h ago"
-    else:
-        days = elapsed // 86400
-        return f"{days}d ago"
-
-
 class VideoEntry:
     def __init__(
         self,
@@ -454,7 +427,7 @@ async def dispatch_pending_notifications(
     """
     Gradually dispatches pending notifications to users according to max_posts_per_min (Option A).
     Allows bursts up to max_posts_per_min within any rolling 60-second window per user.
-    Calculates dynamic relative timestamp (e.g. '(5m ago)') at send time.
+    Appends ' (🤏)' after the URL when the URL contains '/shorts/'.
     Returns total number of messages sent in this call.
     """
     if user_send_times is None:
@@ -462,7 +435,6 @@ async def dispatch_pending_notifications(
 
     sent_count = 0
     now = time.monotonic()
-    now_utc = utc_now()
 
     for user_id in state.get_users_with_pending_notifications():
         if user_id not in user_send_times:
@@ -481,26 +453,13 @@ async def dispatch_pending_notifications(
             title = notification.get("title", "")
             url = notification.get("url", "")
             video_id = notification.get("video_id")
-            pub_raw = notification.get("published")
 
-            pub_dt = parse_human_datetime(pub_raw) if pub_raw else None
-            if not pub_dt and pub_raw:
-                try:
-                    pub_dt = date_parser.parse(pub_raw)
-                    if pub_dt.tzinfo is None:
-                        pub_dt = pub_dt.replace(tzinfo=timezone.utc)
-                except Exception:
-                    pub_dt = None
-
-            if not pub_dt:
-                pub_dt = now_utc
-
-            time_ago = format_time_ago(pub_dt, now_dt=now_utc)
+            shorts_suffix = " (🤏)" if "/shorts/" in url else ""
             if title:
                 escaped_title = html.escape(title)
-                message = f"<b>{escaped_title}</b> {url} ({time_ago})"
+                message = f"<b>{escaped_title}</b> {url}{shorts_suffix}"
             else:
-                message = f"{url} ({time_ago})"
+                message = f"{url}{shorts_suffix}"
 
             reply_markup = None
             if video_id:
