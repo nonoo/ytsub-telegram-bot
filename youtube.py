@@ -20,6 +20,21 @@ SCOPES = [
 ]
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 
+AUTH_EXPIRED_MESSAGE = (
+    "🔑 Your YouTube access has expired or been revoked, so I can't sync your subscriptions "
+    "or use the Watch Later / Listen Later buttons.\n"
+    "Please run /start to reconnect your YouTube account."
+)
+
+
+def is_auth_expired_error(exc: Exception) -> bool:
+    """
+    Returns True if the exception means the stored OAuth credentials can no longer be
+    refreshed, i.e. Google rejected the refresh token with 'invalid_grant'
+    (expired/revoked refresh token, or a session control policy).
+    """
+    return "invalid_grant" in str(exc)
+
 
 def make_client_config(client_id: str, client_secret: str) -> dict:
     return {
@@ -280,6 +295,7 @@ async def sync_user_subscriptions(
     )
     if refreshed_token:
         state.set_user_tokens(user_id, token=refreshed_token, refresh_token=refresh_token)
+    state.clear_user_auth_error(user_id)
 
     existing_channels = user_info.get("channels", {})
     added_titles = [title for ch_id, title in channels.items() if ch_id not in existing_channels]
@@ -338,6 +354,12 @@ async def sync_all_subscriptions(
             logger.info("Synced subscriptions for user %d: %d total (%d newly added).", uid, total, new_count)
         except Exception as e:
             logger.error("Failed to sync subscriptions for user %d: %s", uid, e)
+            if is_auth_expired_error(e):
+                if state.record_user_auth_error(uid, str(e)) and send_message_fn is not None:
+                    try:
+                        await send_message_fn(uid, AUTH_EXPIRED_MESSAGE)
+                    except Exception as send_err:
+                        logger.warning("Failed to send auth-expired notice to user %s: %s", uid, send_err)
 
     return results
 

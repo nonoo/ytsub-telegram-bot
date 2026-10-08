@@ -3,10 +3,13 @@ import tempfile
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+from google.auth.exceptions import RefreshError
 from params import Params
 from state import StateManager
 from youtube import (
+    AUTH_EXPIRED_MESSAGE,
     format_channel_delta_log,
+    is_auth_expired_error,
     sync_all_subscriptions,
     sync_user_subscriptions,
 )
@@ -329,5 +332,94 @@ async def test_sync_user_subscriptions_delta_logging():
             total, new_cnt = await sync_user_subscriptions(sm, params, 1001, send_message_fn=failing_send)
             assert total == 1
             failing_send.assert_called_once()
+
+
+def test_is_auth_expired_error_detection():
+    assert is_auth_expired_error(RefreshError("invalid_grant: Token has been expired or revoked."))
+    assert not is_auth_expired_error(RefreshError("Failed to retrieve access token"))
+    assert not is_auth_expired_error(RuntimeError("API error"))
+
+
+@pytest.mark.asyncio
+async def test_sync_all_subscriptions_notifies_once_on_expired_auth():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        params = Params()
+        params.google_client_id = "test-client-id"
+        params.google_client_secret = "test-client-secret"
+        params.allowed_user_ids = [1001]
+
+        sm.set_user_tokens(1001, token="t1", refresh_token="r1")
+        mock_send = AsyncMock()
+
+        with patch(
+            "youtube.fetch_user_subscriptions",
+            side_effect=RefreshError("invalid_grant: Token has been expired or revoked."),
+        ):
+            results = await sync_all_subscriptions(sm, params, send_message_fn=mock_send)
+            assert results == {}
+            mock_send.assert_awaited_once_with(1001, AUTH_EXPIRED_MESSAGE)
+            assert sm.get_user_auth_error(1001) is not None
+
+            # Subsequent periodic syncs do not notify the user again
+            await sync_all_subscriptions(sm, params, send_message_fn=mock_send)
+            mock_send.assert_awaited_once_with(1001, AUTH_EXPIRED_MESSAGE)
+
+
+@pytest.mark.asyncio
+async def test_sync_success_clears_recorded_auth_error():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        params = Params()
+        params.google_client_id = "test-client-id"
+        params.google_client_secret = "test-client-secret"
+
+        sm.set_user_tokens(1001, token="t1", refresh_token="r1")
+        sm.record_user_auth_error(1001, "invalid_grant: Token has been expired or revoked.")
+
+        with patch("youtube.fetch_user_subscriptions") as mock_fetch:
+            mock_fetch.return_value = ({"UC_1": "Channel 1"}, None)
+            await sync_user_subscriptions(sm, params, 1001)
+
+        assert sm.get_user_auth_error(1001) is None
+
+
+@pytest.mark.asyncio
+async def test_cmd_update_shows_reauth_prompt_on_expired_auth():
+    from handlers import setup_handlers
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+        params.google_client_id = "test-cid"
+        params.google_client_secret = "test-csec"
+
+        sm.set_user_tokens(1001, token="t1", refresh_token="r1")
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        update_handler = next(h for h in registered_handlers if hasattr(h, "commands") and "update" in h.commands)
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 1001
+        mock_reply = AsyncMock()
+        mock_update.effective_message.reply_text = mock_reply
+        context = MagicMock()
+
+        with patch(
+            "youtube.sync_user_subscriptions",
+            new_callable=AsyncMock,
+            side_effect=RefreshError("invalid_grant: Token has been expired or revoked."),
+        ):
+            await update_handler.callback(mock_update, context)
+
+        mock_reply.assert_any_call(AUTH_EXPIRED_MESSAGE)
+        assert sm.get_user_auth_error(1001) is not None
 
 

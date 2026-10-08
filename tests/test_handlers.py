@@ -657,6 +657,61 @@ async def test_cmd_status_shows_pending_notifications():
         reply2 = mock_reply_html.call_args[0][0]
         assert "• Pending notifications: 4" in reply2
 
+        # With an expired YouTube authorization
+        sm.record_user_auth_error(1001, "invalid_grant: Token has been expired or revoked.")
+
+        await status_handler.callback(mock_update, context)
+        reply3 = mock_reply_html.call_args[0][0]
+        assert "YouTube access expired — run /start" in reply3
+
+
+@pytest.mark.asyncio
+async def test_callback_playlist_action_auth_expired():
+    from google.auth.exceptions import RefreshError
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import CallbackQueryHandler
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+        sm.set_user_tokens(1001, "tok-test", "ref-test")
+
+        params = Params()
+        params.bot_token = "123:test"
+        params.allowed_user_ids = [1001]
+        params.google_client_id = "test-cid"
+        params.google_client_secret = "test-csec"
+
+        app = MagicMock()
+        registered_handlers = []
+        app.add_handler = lambda h: registered_handlers.append(h)
+
+        setup_handlers(app, params, sm)
+
+        playlist_handler = next(
+            h for h in registered_handlers
+            if isinstance(h, CallbackQueryHandler) and getattr(h, "pattern", None) and "wl" in h.pattern.pattern
+        )
+
+        mock_update = MagicMock()
+        mock_update.effective_user.id = 1001
+        mock_query = AsyncMock()
+        mock_query.data = "wl:test_vid_1"
+        mock_query.message.reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🕒 Watch Later", callback_data="wl:test_vid_1")]
+        ])
+        mock_update.callback_query = mock_query
+        context = MagicMock()
+
+        with patch("youtube.find_or_create_playlist") as mock_find_create:
+            mock_find_create.side_effect = RefreshError("invalid_grant: Token has been expired or revoked.")
+
+            await playlist_handler.callback(mock_update, context)
+
+            mock_query.answer.assert_called_with(
+                "🔑 YouTube access expired — run /start to reconnect.", show_alert=True
+            )
+            assert sm.get_user_auth_error(1001) is not None
+
 
 
 

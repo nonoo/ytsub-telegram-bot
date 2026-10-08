@@ -49,6 +49,7 @@ ytsub-telegram-bot/
     ├── test_state.py             # State isolation & persistence unit tests
     ├── test_rss.py               # RSS parsing & multi-user notification tests
     ├── test_handlers.py          # Command handlers and auth check tests
+    ├── test_subscription_sync.py # Subscription sync, auth expiry alerting & delta log tests
     └── test_youtube_playlists.py # YouTube playlist interaction unit tests
 ```
 
@@ -71,6 +72,7 @@ ytsub-telegram-bot/
 - Handles subscription syncing: `sync_user_channels()` sets current timestamp for new channels so past videos are not alerted, strictly preserves existing metadata (`last_published`, `last_checked`, `first_error`, `last_error`, `error_alerted`) for retained channels, and preserves `custom_feeds`.
 - Manages custom RSS feeds: `get_user_custom_feeds()`, `add_custom_feed()`, `remove_custom_feed()`, `update_custom_feed_timestamps()`.
 - Tracks errors and recoveries: `record_feed_error()` and `reset_feed_error()`.
+- Tracks OAuth credential failures: `record_user_auth_error()` (stores a per-user `auth_error` object with `first_error`, `last_error`, and `error_alerted`, returning True once per failure episode so the user is notified only once), `clear_user_auth_error()` (called after a successful subscription sync), and `get_user_auth_error()` (used by `/status`).
 - Manages persistent pending notifications outbox: `enqueue_notification()` (with URL deduplication), `get_pending_notifications()`, `peek_pending_notification()`, `pop_pending_notification()`, `clear_pending_notifications()`, `get_users_with_pending_notifications()`, and `get_pending_notifications_count()`.
 
 ### `youtube.py`
@@ -78,12 +80,14 @@ ytsub-telegram-bot/
 - Hardwired constants:
   - `REDIRECT_URI`: `"http://localhost:8080/"`
   - `SCOPES`: `["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/youtube.force-ssl"]`
+  - `AUTH_EXPIRED_MESSAGE`: user-facing alert asking to re-run `/start` when the refresh token is rejected.
+- Expired credentials detection: `is_auth_expired_error(exc)` returns True when Google rejected the refresh token with `invalid_grant` (expired/revoked refresh token or a session control policy). Note that access tokens themselves are refreshed automatically by `google-auth`; only the refresh token can permanently fail.
 - Functions:
   - `generate_auth_url(client_id, client_secret)`: Initiates OAuth flow with offline consent.
   - `exchange_code_for_tokens(flow, code_or_url)`: Extracts code and exchanges for tokens.
   - `fetch_user_subscriptions(client_id, client_secret, token, refresh_token)`: Retrieves channels with pagination and handles automatic token refreshing.
-  - `sync_user_subscriptions(state, params, user_id, send_message_fn=None)`: Synchronizes YouTube channel subscriptions for a user and updates state, logging and messaging added and removed channels to the user upon completion (`"➕ Added channels: ...\n➖ Removed channels: ..."`, truncated with `", and <count> more"` after 10 items in a row).
-  - `sync_all_subscriptions(state, params, send_message_fn=None)`: Iterates all allowed users with OAuth credentials and synchronizes their subscriptions asynchronously in worker threads.
+  - `sync_user_subscriptions(state, params, user_id, send_message_fn=None)`: Synchronizes YouTube channel subscriptions for a user and updates state, logging and messaging added and removed channels to the user upon completion (`"➕ Added channels: ...\n➖ Removed channels: ..."`, truncated with `", and <count> more"` after 10 items in a row). Clears any recorded auth error after a successful sync.
+  - `sync_all_subscriptions(state, params, send_message_fn=None)`: Iterates all allowed users with OAuth credentials and synchronizes their subscriptions asynchronously in worker threads. When a user's refresh token is rejected (`invalid_grant`), records the failure in state and sends `AUTH_EXPIRED_MESSAGE` to that user once per failure episode instead of failing silently.
   - `find_or_create_playlist(client_id, client_secret, token, refresh_token, title)`: Finds or creates a private YouTube playlist (e.g. `YTSub Watch Later` or `YTSub Listen Later`).
   - `add_video_to_playlist(client_id, client_secret, token, refresh_token, playlist_id, video_id)`: Appends a video to the specified YouTube playlist.
   - `remove_video_from_playlist(client_id, client_secret, token, refresh_token, playlist_id, video_id)`: Finds and deletes items matching the video from the specified YouTube playlist.
@@ -102,13 +106,13 @@ ytsub-telegram-bot/
 ### `handlers.py`
 - Implements Telegram interactions using `python-telegram-bot` v21+:
   - `/start`: Interactive onboarding (runs OAuth 2.0 flow using server-configured Google credentials, checks for re-auth confirmation).
-  - `/update`: Refresh subscriptions (errors with prompt to `/start` if not authenticated).
+  - `/update`: Refresh subscriptions (prompts to `/start` if not authenticated, or if YouTube access expired — `invalid_grant` — in which case the failure is also recorded in state).
   - `/custom`: Manage custom RSS feeds (subcommands: `list`, `add <url_or_channel_id>`, `remove <number_or_url>`).
   - `/stop`: Clear user's pending notification queue from state.
   - `/reload`: Admin-only command. Reloads state from disk and checks channels/feeds older than 5 minutes.
-  - `/status`: Displays authenticated status, tracked channel count, custom feed count, pending notification count, check interval, and any feeds with errors (sorted by first error timestamp, displaying `failing since <first_error>: <last_error>`, capped at 10 items, with "...and <count> more" if exceeding).
+  - `/status`: Displays authenticated status, tracked channel count, custom feed count, pending notification count, check interval, any expired YouTube authorization (`⚠️ YouTube access expired — run /start (failing since <first_error>)`), and any feeds with errors (sorted by first error timestamp, displaying `failing since <first_error>: <last_error>`, capped at 10 items, with "...and <count> more" if exceeding).
   - `/help`: Command summary (dynamically includes `/reload` only for admins).
-  - Callback queries: Handles `reauth_*` confirmations, and `wl:*` / `ll:*` / `rwl:*` / `rll:*` playlist additions and removals with toggleable button states and toast confirmations.
+  - Callback queries: Handles `reauth_*` confirmations, and `wl:*` / `ll:*` / `rwl:*` / `rll:*` playlist additions and removals with toggleable button states and toast confirmations. Playlist actions failing with `invalid_grant` show a reauth alert and record the auth error in state.
 
 ### `main.py`
 - Instantiates `ApplicationBuilder`, attaches handlers, and schedules periodic RSS polling via `job_queue.run_repeating()`.
@@ -128,6 +132,7 @@ ytsub-telegram-bot/
     "123456789": {
       "token": "ya29.a0...",
       "refresh_token": "1//0e...",
+      "auth_error": null,
       "playlists": {
         "watch_later": "PL...",
         "listen_later": "PL..."
@@ -165,7 +170,7 @@ ytsub-telegram-bot/
 }
 ```
 
-*Note: Static constants (`token_uri`, `scopes`, `redirect_uri`, `check_interval_sec`) are not stored in the state file to maintain a clean and minimal schema.*
+*Note: Static constants (`token_uri`, `scopes`, `redirect_uri`, `check_interval_sec`) are not stored in the state file to maintain a clean and minimal schema. `auth_error` is only present while the user's OAuth credentials are failing (it holds `first_error`, `last_error`, and `error_alerted`) and is removed automatically after the next successful subscription sync.*
 
 ---
 

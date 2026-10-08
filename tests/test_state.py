@@ -358,3 +358,34 @@ def test_state_file_path_absolute_and_logged(caplog):
         with caplog.at_level(logging.INFO):
             sm_temp.load()
             assert f"Loaded state from {tmp_path}" in caplog.text
+
+
+def test_user_auth_error_record_and_clear():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm = StateManager(f"{tmpdir}/state.json")
+
+        assert sm.get_user_auth_error(1001) is None
+        assert sm.clear_user_auth_error(1001) is False
+
+        # First failure of an episode asks for a notification
+        assert sm.record_user_auth_error(1001, "invalid_grant: Token has been expired or revoked.") is True
+        auth = sm.get_user_auth_error(1001)
+        assert auth["error_alerted"] is True
+        assert auth["first_error"]
+        first_error = auth["first_error"]
+
+        # Repeated failures keep first_error and do not re-alert
+        assert sm.record_user_auth_error(1001, "invalid_grant: still revoked") is False
+        auth = sm.get_user_auth_error(1001)
+        assert auth["first_error"] == first_error
+        assert auth["last_error"] == "invalid_grant: still revoked"
+
+        # Persisted across reload
+        sm2 = StateManager(f"{tmpdir}/state.json")
+        sm2.load()
+        assert sm2.get_user_auth_error(1001)["last_error"] == "invalid_grant: still revoked"
+
+        # Successful re-auth clears the episode; a later failure alerts again
+        assert sm2.clear_user_auth_error(1001) is True
+        assert sm2.get_user_auth_error(1001) is None
+        assert sm2.record_user_auth_error(1001, "invalid_grant: revoked again") is True

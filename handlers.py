@@ -121,7 +121,11 @@ def setup_handlers(app, params: Params, state: StateManager):
             )
         except Exception as e:
             logger.error("Failed to sync subscriptions for %s: %s", user_id, e)
-            await update.effective_message.reply_text(f"❌ Error downloading subscriptions: {e}")
+            if youtube.is_auth_expired_error(e):
+                state.record_user_auth_error(user_id, str(e))
+                await update.effective_message.reply_text(youtube.AUTH_EXPIRED_MESSAGE)
+            else:
+                await update.effective_message.reply_text(f"❌ Error downloading subscriptions: {e}")
 
     async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await check_access(update):
@@ -302,6 +306,7 @@ def setup_handlers(app, params: Params, state: StateManager):
 
         user_id = update.effective_user.id
         has_creds = state.has_user_oauth_credentials(user_id)
+        auth_error = state.get_user_auth_error(user_id)
         user_info = state.get_user(user_id)
         channels = user_info.get("channels", {})
         custom_feeds = user_info.get("custom_feeds", {})
@@ -319,6 +324,8 @@ def setup_handlers(app, params: Params, state: StateManager):
         )
         if pending_count > 0:
             msg += f"\n• Pending notifications: {pending_count}"
+        if auth_error:
+            msg += f"\n• ⚠️ YouTube access expired — run /start (failing since {auth_error.get('first_error')})"
 
         error_feeds = []
         for ch_id, ch_info in channels.items():
@@ -538,7 +545,11 @@ def setup_handlers(app, params: Params, state: StateManager):
         except Exception as e:
             action_name = "removing" if is_remove else "adding"
             logger.error("Error %s video %s to playlist '%s': %s", action_name, video_id, target_title, e)
-            await query.answer(f"❌ Failed: {e}", show_alert=True)
+            if youtube.is_auth_expired_error(e):
+                state.record_user_auth_error(user_id, str(e))
+                await query.answer("🔑 YouTube access expired — run /start to reconnect.", show_alert=True)
+            else:
+                await query.answer(f"❌ Failed: {e}", show_alert=True)
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("update", cmd_update))

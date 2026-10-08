@@ -142,6 +142,46 @@ class StateManager:
             user["refresh_token"] = refresh_token
         self.save()
 
+    def record_user_auth_error(self, user_id: int, error_msg: Any) -> bool:
+        """
+        Records an OAuth refresh failure (refresh token expired or revoked).
+        Sets first_error on the first failure of an episode and updates last_error.
+        Returns True if the user has not been notified about the current failure episode yet.
+        """
+        user = self.get_user(user_id)
+        auth = user.get("auth_error")
+        if not isinstance(auth, dict) or not auth.get("first_error"):
+            auth = {
+                "first_error": format_human_timestamp(),
+                "last_error": None,
+                "error_alerted": False,
+            }
+            user["auth_error"] = auth
+
+        auth["last_error"] = str(error_msg)
+        should_alert = not bool(auth.get("error_alerted"))
+        auth["error_alerted"] = True
+
+        self.save()
+        return should_alert
+
+    def clear_user_auth_error(self, user_id: int) -> bool:
+        """
+        Clears the recorded OAuth auth error once credentials work again.
+        Returns True if an auth error was recorded.
+        """
+        user = self.get_user(user_id)
+        if not user.get("auth_error"):
+            return False
+        del user["auth_error"]
+        self.save()
+        return True
+
+    def get_user_auth_error(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Returns the recorded auth error dict (first_error, last_error, error_alerted) or None."""
+        auth = self.get_user(user_id).get("auth_error")
+        return auth if isinstance(auth, dict) else None
+
     def sync_user_channels(self, user_id: int, fetched_channels: Dict[str, str]) -> int:
         """
         fetched_channels: {channel_id: channel_title}

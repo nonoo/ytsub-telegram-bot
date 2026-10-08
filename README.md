@@ -24,6 +24,7 @@ Tested on Linux, but can run on any system with Python 3.
      - On the **Scopes** page, click **Add or Remove Scopes**. Search for `YouTube Data API v3` (or `youtube.force-ssl`), select the scope `.../auth/youtube.force-ssl` (*See, edit, and permanently delete your YouTube videos, ratings, comments and captions*), click **Update**, then **Save and Continue**.
      - On the **Test users** page, click **+ Add Users**, enter the Google account email address you use for YouTube (and any other users who will connect), then click **Save and Continue**.
      - Click **Back to Dashboard**.
+     - **Publish the app**: click **Publish app** and confirm (**Publishing status**: *Testing* → *In production*). This matters: while an *External* app stays in *Testing* status, Google [expires every issued refresh token after 7 days](https://developers.google.com/identity/protocols/oauth2#expiration), so each user has to re-authenticate with `/start` weekly (the bot's background sync then fails with `invalid_grant`). In production, refresh tokens stay valid until revoked or unused for 6 months. Google verification is *not* required to publish — an unverified app only shows an extra "Google hasn't verified this app" warning during sign-in (click **Advanced** > **Go to YTSub (unsafe)** to continue) and is limited to 100 users. If your Google account belongs to a Google Workspace organization, choosing the **Internal** user type instead avoids both the 100-user limit and the 7-day refresh token expiry.
    - **Create OAuth Client Credentials**:
      - In the left sidebar, navigate to **APIs & Services** > **Credentials**.
      - Click **+ Create Credentials** at the top and select **OAuth client ID**.
@@ -110,7 +111,7 @@ Each authorized user can independently connect their YouTube account and receive
   - `/custom remove <number_or_url>`: Remove a custom feed by its list number or exact URL.
 - `/stop`: Clear your pending notification queue.
 - `/reload`: Reload the state from `ytsub-state.json` and perform RSS feed updates on channels updated more than 5 minutes ago (admin only).
-- `/status`: Show current tracking status (channels tracked, custom feeds, pending notifications queue, check interval, authentication state, and any feeds with errors sorted by first error timestamp).
+- `/status`: Show current tracking status (channels tracked, custom feeds, pending notifications queue, check interval, authentication state, expired YouTube authorization, and any feeds with errors sorted by first error timestamp).
 - `/help`: Display the list of available commands.
 
 ## How it works
@@ -134,6 +135,7 @@ Each authorized user can independently connect their YouTube account and receive
 
 6. **State persistence**: User access tokens, cached playlist IDs, channel update timestamps, and pending notification queues are persisted atomically to `ytsub-state.json`.
 7. **Feed error detection & recovery alerts**: If a feed cannot be fetched or parsed, the start timestamp and latest error are recorded in `ytsub-state.json`. If a feed continuously fails for 6 hours (configurable with `ERROR_ALERT_SEC` / `ERROR_ALERT_HOURS`), it triggers a batched user alert (e.g. `⚠️ Error updating: Feed A, Feed B, ... and 5 more` if more than 10 feeds). Likewise, when a previously alerted feed recovers, it is aggregated into a batched recovery notification (`✅ Working again: Feed A, Feed B, ... and 5 more`).
+8. **Expired YouTube authorization alerts**: If Google rejects a user's stored credentials (`invalid_grant`, e.g. because the refresh token expired or was revoked), the failure is recorded and that user gets a one-time notification asking them to re-run `/start`. Background syncs keep retrying quietly, `/update` and the Watch Later / Listen Later buttons show the same prompt, `/status` lists the expired authorization, and the recorded failure clears automatically once a sync succeeds again.
 
 ## Contributors
 
